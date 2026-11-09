@@ -54,6 +54,7 @@ enum LaunchCoordinator {
         var args: [String]
         /// madeira.cfg keys over the shared file for this launch (TitleConfig); empty for none.
         var config: [String: String] = [:]
+        var configRemovals: Set<String> = []
         /// The title's Steam app ID, set as Steam's game id (SteamGameID); nil for none.
         var steamAppID: UInt32? = nil
         /// Which layer runs the game's Direct3D (LaunchSettings).
@@ -318,7 +319,7 @@ enum LaunchCoordinator {
     /// value is set (FEXProfile.hostFeatures). Steam's game id is logged with its
     /// value where the backend does not replace it.
     private static func applyEnvironment(backend: [String: String], steamAppID: UInt32?,
-                                         fex: FEXProfile.Launch?) -> [String: String] {
+                                         fex: FEXProfile.Launch?, removing: Set<String> = []) -> [String: String] {
         var env = SteamGameID.launchEnvironment(appID: steamAppID,
                                                 backend: backend.merging(fex?.environment ?? [:]) { _, f in f })
         let own = env["FEX_HOSTFEATURES"] ?? getenv("FEX_HOSTFEATURES").map { String(cString: $0) }
@@ -330,6 +331,7 @@ enum LaunchCoordinator {
                 + "x87reduced=\(fex.x87Reduced ? 1 : 0)\(fex.x87Chosen ? "*" : "") "
                 + "diskcache=\(fex.diskCache ? 1 : 0)\(fex.diskCacheChosen ? "*" : "") (* the game's page; the rest \(profile))")
         }
+        for name in removing { env.removeValue(forKey: name); unsetenv(name) }
         for name in env.keys.sorted() { setenv(name, env[name]!, 1) }
         let steam = SteamGameID.names.filter { env[$0] != nil && backend[$0] == nil }
         if !steam.isEmpty { log("environment: Steam's " + steam.map { "\($0)=\(env[$0]!)" }.joined(separator: ", ")) }
@@ -428,7 +430,9 @@ enum LaunchCoordinator {
         }
         log("graphics: \(r.graphics.rawValue); vulkan loader: \(r.khronosVulkanLoader ? "Khronos" : "Wine's")")
 
-        if r.config.isEmpty {
+        let environmentRemovals = Set(r.configRemovals.filter { $0.hasPrefix("env.") && $0.count > 4 }
+            .map { String($0.dropFirst(4)) })
+        if r.config.isEmpty && r.configRemovals.isEmpty {
             // Undo an earlier launch's title config: this one reads the shared file.
             if let inherited = inheritedDocsDir { setenv("MADEIRA_DOCS_DIR", inherited, 1) } else { unsetenv("MADEIRA_DOCS_DIR") }
         } else {
@@ -437,13 +441,14 @@ enum LaunchCoordinator {
             let docs = runtime.prefixURL.appendingPathComponent("Documents", isDirectory: true)
             let shared = inheritedDocsDir.map { URL(fileURLWithPath: $0) } ?? docs
             do {
-                let dir = try TitleConfig.prepare(shared: shared, documents: docs, exe: r.exe, config: r.config, title: r.exe)
+                let dir = try TitleConfig.prepare(shared: shared, documents: docs, exe: r.exe, config: r.config,
+                                                 title: r.exe, removing: r.configRemovals)
                 setenv("MADEIRA_DOCS_DIR", dir.path, 1)
                 log("config: MADEIRA_DOCS_DIR=\(dir.path) with " + r.config.keys.sorted().map { "\($0) = \(r.config[$0]!)" }.joined(separator: ", "))
                 // The file's `env.NAME = value` keys are exported before the runtime
                 // starts, as Madeira's app did (madeira_cfg.h): ntdll reads WINEDEBUG
                 // and the like once, at its own start.
-                for key in r.config.keys.sorted() where key.hasPrefix("env.") && key.count > 4 {
+                for key in r.config.keys.sorted() where key.hasPrefix("env.") && key.count > 4 && !r.configRemovals.contains(key) {
                     setenv(String(key.dropFirst(4)), r.config[key]!, 1)
                     log("config: environment \(key.dropFirst(4))=\(r.config[key]!)")
                 }
@@ -452,6 +457,7 @@ enum LaunchCoordinator {
             }
         }
 
+        for name in environmentRemovals { unsetenv(name) }
         if let s = r.steamAPI { prepareSteamAPI(s) }
         // However the launch ends from here, the ticket goes with it (decision 0017).
         defer { if let s = r.steamAPI { removeTicket(s, when: "at exit") } }
@@ -550,7 +556,8 @@ enum LaunchCoordinator {
             log("memory plan: DXVK_CONFIG \(option); "
                 + p.vulkanEnvironment.keys.sorted().map { "\($0)=\(p.vulkanEnvironment[$0]!)" }.joined(separator: " "))
         }
-        let environment = applyEnvironment(backend: backend, steamAppID: r.steamAppID, fex: r.fex)
+        let environment = applyEnvironment(backend: backend, steamAppID: r.steamAppID, fex: r.fex,
+                                           removing: environmentRemovals)
         PacedMetalLayer.onFirstFrame {
             mark("first frame")
             step(.drawing)

@@ -33,8 +33,8 @@ int host_memory_read(host_memory *out)
 typedef CFTypeRef (*sectask_create_fn)(CFAllocatorRef);
 typedef CFTypeRef (*sectask_value_fn)(CFTypeRef, CFStringRef, CFErrorRef *);
 
-/* 1 when the entitlement's value is true, 0 when absent or not true, -1 when unreadable. */
-static int entitlement_value(sectask_value_fn value, CFTypeRef task, const char *name)
+/* Check presence separately for application-identifier, whose value is a string. */
+static int entitlement_value(sectask_value_fn value, CFTypeRef task, const char *name, int presence_only)
 {
     CFStringRef key = CFStringCreateWithCString(NULL, name, kCFStringEncodingUTF8);
     CFTypeRef v;
@@ -44,7 +44,7 @@ static int entitlement_value(sectask_value_fn value, CFTypeRef task, const char 
     v = value(task, key, NULL);
     CFRelease(key);
     if (!v) return 0;
-    r = CFGetTypeID(v) == CFBooleanGetTypeID() ? CFBooleanGetValue((CFBooleanRef)v) : 1;
+    r = presence_only || (CFGetTypeID(v) == CFBooleanGetTypeID() && CFBooleanGetValue((CFBooleanRef)v));
     CFRelease(v);
     return r;
 }
@@ -61,8 +61,8 @@ int host_entitlement(const char *name)
     create = (sectask_create_fn)dlsym(security, "SecTaskCreateFromSelf");
     value = (sectask_value_fn)dlsym(security, "SecTaskCopyValueForEntitlement");
     if (!create || !value || !(task = create(NULL))) return -1;
-    r = entitlement_value(value, task, name);
-    if (r == 0 && entitlement_value(value, task, "application-identifier") == 0) r = -1;
+    r = entitlement_value(value, task, name, 0);
+    if (r == 0 && entitlement_value(value, task, "application-identifier", 1) <= 0) r = -1;
     CFRelease(task);
     return r;
 }

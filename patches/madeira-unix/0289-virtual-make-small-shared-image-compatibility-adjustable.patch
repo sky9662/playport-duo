@@ -1,0 +1,30 @@
+From 49c6a47967110674dd84bffdb5bd067065a5b86a Mon Sep 17 00:00:00 2001
+From: Playport fork <local@example.invalid>
+Date: Mon, 9 Nov 2026 14:11:20 +0800
+Subject: [PATCH] virtual: allow disabling small shared-image compatibility
+
+Keep the installed behavior unless the release UI explicitly opts out.
+
+Class: ios-port
+Evidence: tools/tests/test_image_shared.py
+Offered-upstream: no; fork-specific release setting
+---
+ build/ntdll-unix/pp_image_shared_ios.h | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/build/ntdll-unix/pp_image_shared_ios.h b/build/ntdll-unix/pp_image_shared_ios.h
+index decd181..c9434cf 100644
+--- a/build/ntdll-unix/pp_image_shared_ios.h
++++ b/build/ntdll-unix/pp_image_shared_ios.h
+@@ -128,6 +128,8 @@ static NTSTATUS ios_image_shared_map( struct file_view *view, int fd, IMAGE_NT_H
+     struct ppis_slot *slot = NULL;
+     void *mapping;
+     unsigned i;
++    const char *enabled = getenv( "PLAYPORT_SMALL_SHARED_IMAGE" );
++    if (enabled && !strcmp( enabled, "0" )) return STATUS_NOT_SUPPORTED;
+     if (nt->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64 ||
+         (view->protect & (VPROT_WOW64_IMAGE | VPROT_ARM64EC)) ||
+         (sec->Characteristics & (IMAGE_SCN_MEM_SHARED | IMAGE_SCN_MEM_WRITE)) !=
+-- 
+2.56.0
+

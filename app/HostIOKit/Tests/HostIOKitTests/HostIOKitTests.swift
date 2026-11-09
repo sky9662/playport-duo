@@ -263,6 +263,24 @@ final class InputTraceTests: XCTestCase {
 }
 
 final class DisplayTests: XCTestCase {
+    func testDuoPanelAndFourThreeAreDistinctAcrossFoldAndRotation() {
+        // Hardware fixtures only: runtime code uses scene geometry.
+        for (width, height) in [(2670, 1878), (1878, 2670), (2034, 1398), (1398, 2034)] {
+            let native = Display.guestSize(panelLong: width, panelShort: height, spec: "native")!
+            XCTAssertNotEqual(native.0 * 3, native.1 * 4)
+            let fourThree = Display.guestSize(panelLong: width, panelShort: height, spec: "4:3@720")!
+            XCTAssertEqual(fourThree.0, 960)
+            XCTAssertEqual(fourThree.1, 720)
+            let fit = Display.aspectFit(contentWidth: 960, contentHeight: 720, width: Double(width), height: Double(height))
+            XCTAssertEqual(fit.2 / fit.3, 4.0 / 3.0, accuracy: 0.00001)
+            XCTAssertGreaterThanOrEqual(fit.0, 0)
+            XCTAssertGreaterThanOrEqual(fit.1, 0)
+            let center = Pointer.clientFraction(x: fit.2 / 2, y: fit.3 / 2, width: fit.2, height: fit.3)!
+            XCTAssertEqual(center.0, 32768)
+            XCTAssertEqual(center.1, 32768)
+        }
+    }
+
     func testGuestSize() {
         // iPhone Air: 1260 × 2736 native pixels, either way round.
         XCTAssertEqual(Display.guestSize(panelLong: 2736, panelShort: 1260, spec: nil).map { [$0.0, $0.1] }, [2736, 1260])

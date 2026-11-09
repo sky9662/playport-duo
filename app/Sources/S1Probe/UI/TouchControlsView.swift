@@ -212,6 +212,8 @@ final class OnScreenControls: ObservableObject {
         let launch = TitleLaunch.shared
         let game = launch.titleID.map { ControlsStore.shared.game($0) }
         let defaults = ControlsStore.shared.defaults
+        controls.trackpadScale = 2 * (game?.trackpadSensitivity(over: defaults) ?? defaults.trackpadSensitivity)
+        controls.lookScale = 3 * (game?.mouseSensitivity(over: defaults) ?? defaults.mouseSensitivity)
         let compat = launch.titleID.flatMap { LaunchSettingsStore.compat.entry(for: $0)?.controls }
         let s = ControlsState.resolve(game: game, defaults: defaults, controllerConnected: controllers > 0, compat: compat)
         let newLayout = s.drawnLayout
@@ -707,8 +709,19 @@ extension UIView {
     /// fills the window: the window's insets are taken too, whichever is larger.
     var gameSafeInsets: UIEdgeInsets {
         let own = safeAreaInsets, w = window?.safeAreaInsets ?? .zero
-        return UIEdgeInsets(top: max(own.top, w.top), left: max(own.left, w.left),
-                            bottom: max(own.bottom, w.bottom), right: max(own.right, w.right))
+        var result = UIEdgeInsets(top: max(own.top, w.top), left: max(own.left, w.left),
+                                  bottom: max(own.bottom, w.bottom), right: max(own.right, w.right))
+        if #available(iOS 27.1, *) {
+            let regions = reservedRegions(kind: .occlusion).map {
+                TouchRect(cg: $0.frame.intersection(bounds).offsetBy(dx: -bounds.minX, dy: -bounds.minY))
+            }
+            let safe = ControlInsets(top: Double(result.top), left: Double(result.left),
+                                     bottom: Double(result.bottom), right: Double(result.right))
+                .avoiding(regions, width: Double(bounds.width), height: Double(bounds.height))
+            result = UIEdgeInsets(top: CGFloat(safe.top), left: CGFloat(safe.left),
+                                  bottom: CGFloat(safe.bottom), right: CGFloat(safe.right))
+        }
+        return result
     }
 
     /// Where the game's picture is (GameSurfaceView.picture): this view fills the game view.

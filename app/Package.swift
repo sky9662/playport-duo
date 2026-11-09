@@ -129,7 +129,9 @@ let package = Package(
         // snapshot (WiniosGamepad.c), which Wine's XInput reads through win32u,
         // and the declarations of the runtime extensions HostIO.swift calls
         // (docs/ARCHITECTURE.md, HostIO).
-        .target(name: "HostIO", dependencies: ["WinIOS"]),
+        .target(name: "HostIO", dependencies: ["WinIOS"],
+                cSettings: [.unsafeFlags(["-fobjc-arc"])],
+                linkerSettings: [.linkedFramework("QuartzCore"), .linkedFramework("CoreGraphics")]),
         // Only the dev app depends on this synthetic native-authentication probe.
         .target(name: "AuthProbe", linkerSettings: [.linkedFramework("GSS")]),
         // Only the dev app depends on this: the task's memory ledger for the footprint-jump sampler.

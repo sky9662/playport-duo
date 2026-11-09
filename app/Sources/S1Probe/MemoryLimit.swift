@@ -58,7 +58,7 @@ enum MemoryLimit {
 
     static func read() -> Reading {
         var m = host_memory()
-        _ = host_memory_read(&m)
+        let measured = host_memory_read(&m) == 0
         var simulated: Int?, simulatedPool: Int?
         #if !PLAYPORT_RELEASE
         simulated = UserDefaults.standard.integer(forKey: simulatedKey)
@@ -66,7 +66,7 @@ enum MemoryLimit {
         simulatedPool = UserDefaults.standard.integer(forKey: simulatedPoolKey)
         if simulatedPool! <= 0 { simulatedPool = nil }
         #endif
-        return Reading(limitMB: m.available > 0 ? Int((m.available + m.footprint) >> 20) : nil,
+        return Reading(limitMB: measured && m.available > 0 ? Int((m.available + m.footprint) >> 20) : nil,
                        footprintMB: Int(m.footprint >> 20),
                        physicalMB: Int(ProcessInfo.processInfo.physicalMemory >> 20),
                        entitled: entitled, simulatedMB: simulated, simulatedPoolMB: simulatedPool)

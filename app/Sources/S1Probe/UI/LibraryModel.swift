@@ -449,6 +449,7 @@ final class LibraryModel: ObservableObject {
                                     x87Reduced: settings.x87Reduced, diskCache: settings.diskCache)
         guard TitleLaunch.shared.start(title: t.name, titleID: t.id, exe: plan.exe, args: plan.args + settings.arguments + epicArgs,
                                        config: settings.config(over: plan.config),
+                                       configRemovals: settings.compatibility.configRemovals,
                                        screen: settings.guestScreen, frameLimit: settings.frameLimit,
                                        graphics: settings.graphics, graphicsEnvironment: settings.graphicsEnvironment,
                                        steamAppID: t.appID, fex: fex, steamAPI: steamAPI,

@@ -1,0 +1,703 @@
+From 81863fefbbaf0ee0757387237e620b77e73528a0 Mon Sep 17 00:00:00 2001
+From: Local compatibility investigation <local@example.invalid>
+Date: Wed, 4 Nov 2026 21:39:52 +0800
+Subject: [PATCH] virtual: service small image shared pages through aliases
+
+Keep small writable shared x64 PE sections coherent on a 16 KB host without
+sharing or overwriting their neighbouring private sections. Cover the observed
+DOOM 2016 and Vulkan executable layouts with a guarded, non-executable-page
+fallback. Keep true shared aliases, enforce logical guest permissions, use
+canonical atomic operations, and drain fault readers before retiring aliases.
+Decline native-code overlap, loader directories, shared-target relocations and
+unsupported instruction forms instead of substituting private data.
+
+Class: ios-port
+Evidence: tools/tests/test_image_shared.py; real shared-alias host checks and isolated iOS ARM64 component compile passed; full Wine build and phone gate pending
+Offered-upstream: no; local candidate pending full native build and device validation
+---
+ build/ntdll-unix/pp_image_shared.h        | 149 +++++++++++++
+ build/ntdll-unix/pp_image_shared_ios.h    | 253 ++++++++++++++++++++++
+ build/ntdll-unix/pp_image_shared_signal.h | 128 +++++++++++
+ build/ntdll-unix/shims/mach/mach_vm.h     |   4 +
+ build/ntdll-unix/signal_arm64_ios.c       |   4 +
+ build/ntdll-unix/virtual_ios.c            |  30 ++-
+ 6 files changed, 566 insertions(+), 2 deletions(-)
+ create mode 100644 build/ntdll-unix/pp_image_shared.h
+ create mode 100644 build/ntdll-unix/pp_image_shared_ios.h
+ create mode 100644 build/ntdll-unix/pp_image_shared_signal.h
+
+diff --git a/build/ntdll-unix/pp_image_shared.h b/build/ntdll-unix/pp_image_shared.h
+new file mode 100644
+index 0000000..4dfbb14
+--- /dev/null
++++ b/build/ntdll-unix/pp_image_shared.h
+@@ -0,0 +1,149 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later
++ * Small PE shared sections in a host page also containing private bytes.
++ * The guest frame stays inaccessible. Accesses use either the section's true
++ * MAP_SHARED alias or a same-memory private alias of the original frame.
++ * Never widen the shared mapping over a neighbouring private section.
++ */
++#ifndef PP_IMAGE_SHARED_H
++#define PP_IMAGE_SHARED_H
++#include <stdint.h>
++#include <stddef.h>
++
++struct ppis_range { uintptr_t frame, guest, shared, private_alias; size_t size, frame_size; };
++
++/* A single access may cross the shared/private boundary; callers gather or
++ * scatter plain accesses in chunks. Atomic accesses must fit one chunk. */
++static inline uintptr_t ppis_route( const struct ppis_range *r, uintptr_t addr, size_t *size )
++{
++    size_t n;
++    if (!*size || addr < r->frame || addr - r->frame >= r->frame_size) return 0;
++    n = r->frame_size - (addr - r->frame);
++    if (addr < r->guest)
++    {
++        if (n > r->guest - addr) n = r->guest - addr;
++        if (*size > n) *size = n;
++        return r->private_alias + (addr - r->frame);
++    }
++    if (addr - r->guest < r->size)
++    {
++        n = r->size - (addr - r->guest);
++        if (*size > n) *size = n;
++        return r->shared + (addr - r->guest);
++    }
++    if (*size > n) *size = n;
++    return r->private_alias + (addr - r->frame);
++}
++
++struct ppis_reservation { uintptr_t addr; uint64_t value, epoch; unsigned bytes; };
++enum { PPIS_NOT_ATOMIC, PPIS_LOAD, PPIS_STORE, PPIS_EXCLUSIVE_STORE };
++
++static inline int ppis_atomic_kind( uint32_t insn )
++{
++    if ((insn & 0x3ffffc00) == 0x085f7c00 || (insn & 0x3ffffc00) == 0x085ffc00 ||
++        (insn & 0x3ffffc00) == 0x08dffc00 || (insn & 0x3ffffc00) == 0x38bfc000)
++        return PPIS_LOAD;   /* LDXR, LDAXR, LDAR, LDAPR */
++    if ((insn & 0x3fe0fc00) == 0x08007c00 || (insn & 0x3fe0fc00) == 0x0800fc00)
++        return PPIS_EXCLUSIVE_STORE;
++    if ((insn & 0x3ffffc00) == 0x089ffc00 || (insn & 0x3ffffc00) == 0x089f7c00)
++        return PPIS_STORE;
++    if ((insn & 0x3fa07c00) == 0x08a07c00) return PPIS_LOAD; /* CAS, not CASP */
++    switch (insn & 0x3f20fc00)
++    {
++    case 0x38200000: case 0x38201000: case 0x38202000: case 0x38203000: case 0x38208000:
++        return PPIS_LOAD; /* LDADD, LDCLR, LDEOR, LDSET, SWP */
++    }
++    return PPIS_NOT_ATOMIC;
++}
++
++/* Reconstruct the instruction's start address, rather than assuming the Mach
++ * fault address is its first byte (an unaligned/pair access can fault later).
++ * base is Rn/SP; index is Rm, both from the stopped thread's original context. */
++static inline int ppis_address( uint32_t insn, uint64_t base, uint64_t index, uintptr_t *addr )
++{
++    unsigned size = insn >> 30, opc = (insn >> 22) & 3;
++    int64_t offset = 0;
++    if (ppis_atomic_kind( insn )) { *addr = base; return 1; }
++    if ((insn & 0x3f000000) == 0x39000000 || (insn & 0x3f000000) == 0x3d000000)
++    {
++        unsigned shift = ((insn & (1u << 26)) && (opc & 2)) ? 4 : size;
++        offset = (uint64_t)((insn >> 10) & 0xfff) << shift;
++    }
++    else if ((insn & 0x3b200c00) == 0x38200800) /* GPR/SIMD register offset */
++    {
++        unsigned option = (insn >> 13) & 7;
++        unsigned shift = ((insn & (1u << 26)) && (opc & 2)) ? 4 : size;
++        if (option == 2) index = (uint32_t)index;
++        else if (option == 6) index = (int32_t)index;
++        else if (option != 3 && option != 7) return 0;
++        offset = (int64_t)(index << ((insn & (1u << 12)) ? shift : 0));
++    }
++    else if ((insn & 0x3b200000) == 0x38000000 || (insn & 0x3f200c00) == 0x19000000)
++    {
++        unsigned mode = (insn >> 10) & 3;
++        offset = (int64_t)((insn >> 12) & 0x1ff);
++        if (offset & 0x100) offset -= 0x200;
++        if (mode == 1 && (insn & 0x3f200c00) != 0x19000000) offset = 0; /* post-index */
++    }
++    else if ((insn & 0x3a000000) == 0x28000000) /* GPR/SIMD pair */
++    {
++        unsigned kind = (insn >> 23) & 3;
++        unsigned scale = (insn & (1u << 26)) ? (4u << size) : ((size & 2) ? 8 : 4);
++        if (size == 3) return 0;
++        offset = (int64_t)((insn >> 15) & 0x7f);
++        if (offset & 0x40) offset -= 0x80;
++        offset *= scale;
++        if (kind == 1) offset = 0;
++    }
++    else return 0; /* No guessed effective address for an unknown encoding. */
++    *addr = base + (uint64_t)offset;
++    return 1;
++}
++
++/* Every operation is performed atomically at the canonical backing address.
++ * In particular, do NOT reuse the older memcpy-based LSE/STXR emulator here:
++ * another instance or a directly mapped shared view may access the same bytes.
++ * result is Rt for loads/LSE, Rs for CAS, status Rs for STXR. */
++static inline int ppis_atomic( uint32_t insn, uintptr_t addr, uint64_t rt, uint64_t rs,
++                               uint64_t epoch, struct ppis_reservation *reservation, uint64_t *result )
++{
++    unsigned bytes = 1u << (insn >> 30), kind = ppis_atomic_kind( insn );
++    int exclusive_load = (insn & 0x3ffffc00) == 0x085f7c00 || (insn & 0x3ffffc00) == 0x085ffc00;
++    int cas = (insn & 0x3fa07c00) == 0x08a07c00;
++    if (!kind || (addr & (bytes - 1))) return 0;
++    if ((exclusive_load || kind == PPIS_EXCLUSIVE_STORE) && !reservation) return 0;
++#define PPIS_DO(T) do { \
++    T *p = (T *)addr, old, expected; \
++    if (exclusive_load) { \
++        old = __atomic_load_n( p, __ATOMIC_SEQ_CST ); \
++        *reservation = (struct ppis_reservation){addr, old, epoch, bytes}; *result = old; \
++    } else if (kind == PPIS_EXCLUSIVE_STORE) { \
++        expected = (T)reservation->value; \
++        *result = !(reservation->addr == addr && reservation->bytes == bytes && reservation->epoch == epoch && \
++                    __atomic_compare_exchange_n( p, &expected, (T)rt, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST )); \
++        reservation->bytes = 0; \
++    } else if (kind == PPIS_STORE) __atomic_store_n( p, (T)rt, __ATOMIC_SEQ_CST ); \
++    else if (cas) { \
++        expected = (T)rs; \
++        __atomic_compare_exchange_n( p, &expected, (T)rt, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST ); \
++        *result = expected; \
++    } else switch (insn & 0x3f20fc00) { \
++        case 0x38200000: *result = __atomic_fetch_add( p, (T)rs, __ATOMIC_SEQ_CST ); break; \
++        case 0x38201000: *result = __atomic_fetch_and( p, (T)~rs, __ATOMIC_SEQ_CST ); break; \
++        case 0x38202000: *result = __atomic_fetch_xor( p, (T)rs, __ATOMIC_SEQ_CST ); break; \
++        case 0x38203000: *result = __atomic_fetch_or( p, (T)rs, __ATOMIC_SEQ_CST ); break; \
++        case 0x38208000: *result = __atomic_exchange_n( p, (T)rs, __ATOMIC_SEQ_CST ); break; \
++        default: *result = __atomic_load_n( p, __ATOMIC_SEQ_CST ); break; \
++    } \
++} while (0)
++    switch (bytes)
++    {
++    case 1: PPIS_DO(uint8_t); break;
++    case 2: PPIS_DO(uint16_t); break;
++    case 4: PPIS_DO(uint32_t); break;
++    case 8: PPIS_DO(uint64_t); break;
++    default: return 0;
++    }
++#undef PPIS_DO
++    return kind;
++}
++#endif
+diff --git a/build/ntdll-unix/pp_image_shared_ios.h b/build/ntdll-unix/pp_image_shared_ios.h
+new file mode 100644
+index 0000000..decd181
+--- /dev/null
++++ b/build/ntdll-unix/pp_image_shared_ios.h
+@@ -0,0 +1,253 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later
++ * Included by virtual_ios.c, with virtual_mutex held by the mapping writer.
++ * Lock-free fault readers pin a slot before using either alias. Retiring a
++ * view unpublishes all its slots and drains the pins before unmapping aliases.
++ */
++#ifndef PP_IMAGE_SHARED_IOS_H
++#define PP_IMAGE_SHARED_IOS_H
++#include "pp_image_shared.h"
++#include <sched.h>
++#define PPIS_SLOTS 64
++struct ppis_slot
++{
++    struct file_view *owner;
++    struct ppis_range range;
++    void *mapping;
++    size_t mapping_size;
++    uint64_t epoch;
++    unsigned readers;
++};
++static struct ppis_slot ios_image_shared_slots[PPIS_SLOTS];
++static uint64_t ios_image_shared_epoch;
++static unsigned ios_image_shared_owned;
++
++int ios_image_shared_acquire( uintptr_t addr, unsigned bytes, struct ppis_range *range, uint64_t *epoch )
++{
++    unsigned i;
++    if (!__atomic_load_n( &ios_image_shared_owned, __ATOMIC_ACQUIRE )) return 0;
++    for (i = 0; i < PPIS_SLOTS; i++)
++    {
++        struct ppis_slot *s = &ios_image_shared_slots[i];
++        uint64_t e = __atomic_load_n( &s->epoch, __ATOMIC_ACQUIRE );
++        if (!e) continue;
++        __atomic_fetch_add( &s->readers, 1, __ATOMIC_SEQ_CST );
++        if (e != __atomic_load_n( &s->epoch, __ATOMIC_SEQ_CST ))
++        {
++            __atomic_fetch_sub( &s->readers, 1, __ATOMIC_RELEASE );
++            continue;
++        }
++        if (bytes && addr >= s->range.frame && addr - s->range.frame < s->range.frame_size &&
++            bytes <= s->range.frame_size - (addr - s->range.frame))
++        {
++            *range = s->range; *epoch = e;
++            return i + 1;
++        }
++        __atomic_fetch_sub( &s->readers, 1, __ATOMIC_RELEASE );
++    }
++    return 0;
++}
++
++void ios_image_shared_release( int token )
++{
++    if (token > 0 && token <= PPIS_SLOTS)
++        __atomic_fetch_sub( &ios_image_shared_slots[token - 1].readers, 1, __ATOMIC_RELEASE );
++}
++
++int ios_image_shared_access_allowed( uintptr_t addr, unsigned bytes, int write )
++{
++    uintptr_t p, end = addr + bytes;
++    if (!bytes || end < addr) return 0;
++    for (p = addr & ~(uintptr_t)page_mask; p < end; p += page_size)
++    {
++        unsigned v = get_page_vprot( (void *)p );
++        if (!(v & VPROT_COMMITTED) || (v & VPROT_GUARD)) return 0;
++        if (write)
++        {
++            if (!(v & (VPROT_WRITE | VPROT_WRITECOPY)) || (v & VPROT_WRITEWATCH)) return 0;
++        }
++        else if (!(v & (VPROT_READ | VPROT_WRITE | VPROT_WRITECOPY | VPROT_EXEC))) return 0;
++    }
++    return 1;
++}
++
++/* Writer-only: mprotect_range must never open the composite guest frame. */
++static BOOL ios_image_shared_frame( const void *addr )
++{
++    unsigned i;
++    if (!__atomic_load_n( &ios_image_shared_owned, __ATOMIC_RELAXED )) return FALSE;
++    for (i = 0; i < PPIS_SLOTS; i++)
++        if (ios_image_shared_slots[i].epoch && ios_image_shared_slots[i].range.frame == (uintptr_t)addr)
++            return TRUE;
++    return FALSE;
++}
++
++static BOOL ios_image_shared_pending( struct file_view *view )
++{
++    unsigned i;
++    if (!__atomic_load_n( &ios_image_shared_owned, __ATOMIC_RELAXED )) return FALSE;
++    for (i = 0; i < PPIS_SLOTS; i++) if (ios_image_shared_slots[i].owner == view) return TRUE;
++    return FALSE;
++}
++
++static void ios_image_shared_drop( struct file_view *view )
++{
++    unsigned i;
++    if (!__atomic_load_n( &ios_image_shared_owned, __ATOMIC_RELAXED )) return;
++    for (i = 0; i < PPIS_SLOTS; i++)
++        if (ios_image_shared_slots[i].owner == view)
++            __atomic_store_n( &ios_image_shared_slots[i].epoch, 0, __ATOMIC_SEQ_CST );
++    for (i = 0; i < PPIS_SLOTS; i++)
++    {
++        struct ppis_slot *s = &ios_image_shared_slots[i];
++        if (s->owner != view) continue;
++        while (__atomic_load_n( &s->readers, __ATOMIC_SEQ_CST )) sched_yield();
++        if (s->range.private_alias)
++            mach_vm_deallocate( mach_task_self(), s->range.private_alias, s->range.frame_size );
++        munmap( s->mapping, s->mapping_size );
++        s->owner = NULL;
++        __atomic_fetch_sub( &ios_image_shared_owned, 1, __ATOMIC_RELEASE );
++        /* Do not reset readers: a reader that observed the retired epoch may
++         * still increment it, then decline without dereferencing either alias. */
++    }
++}
++
++/* Only the observed shape is opted in: one non-executable x64 shared 4 KB
++ * section, surrounded by private non-writable/non-executable sections. Native
++ * ARM images, larger shared sections and import/IAT pages keep the old path. */
++static NTSTATUS ios_image_shared_map( struct file_view *view, int fd, IMAGE_NT_HEADERS *nt,
++                                      IMAGE_SECTION_HEADER *sections, unsigned index, SIZE_T size,
++                                      off_t offset, SIZE_T header_map_size )
++{
++    IMAGE_SECTION_HEADER *sec = sections + index;
++    uintptr_t guest = (uintptr_t)view->base + sec->VirtualAddress;
++    uintptr_t frame = guest & ~(uintptr_t)host_page_mask;
++    SIZE_T frame_rva = frame - (uintptr_t)view->base;
++    off_t file_start;
++    size_t file_delta, length;
++    struct stat st;
++    struct ppis_slot *slot = NULL;
++    void *mapping;
++    unsigned i;
++    if (nt->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64 ||
++        (view->protect & (VPROT_WOW64_IMAGE | VPROT_ARM64EC)) ||
++        (sec->Characteristics & (IMAGE_SCN_MEM_SHARED | IMAGE_SCN_MEM_WRITE)) !=
++                               (IMAGE_SCN_MEM_SHARED | IMAGE_SCN_MEM_WRITE) ||
++        (sec->Characteristics & IMAGE_SCN_MEM_EXECUTE) || size != page_size ||
++        page_size != 0x1000 || host_page_size != 0x4000 || (guest & page_mask) ||
++        size > host_page_size - (guest - frame) || (offset & (off_t)page_mask) ||
++        !((guest | size) & host_page_mask) || offset < 0 ||
++        frame_rva < header_map_size || frame_rva > view->size ||
++        host_page_size > view->size - frame_rva) return STATUS_INVALID_PARAMETER;
++    for (i = 0; i < nt->FileHeader.NumberOfSections; i++)
++    {
++        SIZE_T rva = sections[i].VirtualAddress;
++        SIZE_T bytes = sections[i].Misc.VirtualSize ? sections[i].Misc.VirtualSize : sections[i].SizeOfRawData;
++        if (i == index || !bytes) continue;
++        if (rva > view->size || bytes > view->size - rva) return STATUS_INVALID_IMAGE_FORMAT;
++        if (rva < sec->VirtualAddress + size && rva + bytes > sec->VirtualAddress)
++            return STATUS_INVALID_IMAGE_FORMAT;
++        if (rva < frame_rva + host_page_size && rva + bytes > frame_rva &&
++            (sections[i].Characteristics & (IMAGE_SCN_MEM_WRITE | IMAGE_SCN_MEM_EXECUTE)))
++            return STATUS_NOT_SUPPORTED;
++    }
++    for (i = 0; i < 4; i++)
++    {
++        static const unsigned dirs[] = {IMAGE_DIRECTORY_ENTRY_IMPORT, IMAGE_DIRECTORY_ENTRY_IAT,
++                                       IMAGE_DIRECTORY_ENTRY_BASERELOC, IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG};
++        IMAGE_DATA_DIRECTORY *d = get_data_dir( nt, view->size,
++                                               dirs[i] );
++        if (d && d->Size && d->VirtualAddress < sec->VirtualAddress + size &&
++            (uint64_t)d->VirtualAddress + d->Size > sec->VirtualAddress) return STATUS_NOT_SUPPORTED;
++    }
++    for (i = 0; i < PPIS_SLOTS; i++) if (!ios_image_shared_slots[i].owner) { slot = &ios_image_shared_slots[i]; break; }
++    if (!slot) return STATUS_NO_MEMORY;
++    if (fstat( fd, &st ) || st.st_size < offset || size > (uint64_t)(st.st_size - offset))
++        return STATUS_INVALID_IMAGE_FORMAT;
++    file_start = offset & ~(off_t)host_page_mask;
++    file_delta = offset - file_start;
++    length = ROUND_SIZE( 0, file_delta + size, host_page_mask );
++    mapping = mmap( NULL, length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, file_start );
++    if (mapping == MAP_FAILED) return STATUS_NO_MEMORY;
++    /* Only the temporary image construction copy. Runtime accesses are always
++     * routed to mapping, so simultaneous instances do not get private copies. */
++    memcpy( (void *)guest, (char *)mapping + file_delta, size );
++    slot->range = (struct ppis_range){frame, guest, (uintptr_t)mapping + file_delta, 0, size, host_page_size};
++    slot->mapping = mapping; slot->mapping_size = length; slot->owner = view;
++    __atomic_fetch_add( &ios_image_shared_owned, 1, __ATOMIC_RELEASE );
++    dprintf( 2, "[image-shared] staged shared RVA %#x size %#lx in private host frame %#lx\n",
++             sec->VirtualAddress, (unsigned long)size, (unsigned long)frame_rva );
++    return STATUS_SUCCESS;
++}
++
++/* The staging copy must not receive base fixups: canonical bytes can already
++ * have been changed by another process. Decline such images instead of copying
++ * relocations back and overwriting concurrent writes. Checked before fixups. */
++static BOOL ios_image_shared_fixups_safe( struct file_view *view, IMAGE_NT_HEADERS *nt, int relocate )
++{
++    IMAGE_DATA_DIRECTORY *d;
++    SIZE_T at = 0;
++    if (!ios_image_shared_pending( view )) return TRUE;
++    if (view->protect & (VPROT_ARM64EC | VPROT_WOW64_IMAGE)) return FALSE;
++    if (!relocate || (nt->FileHeader.Characteristics & IMAGE_FILE_RELOCS_STRIPPED)) return TRUE;
++    d = get_data_dir( nt, view->size, IMAGE_DIRECTORY_ENTRY_BASERELOC );
++    if (!d) return TRUE;
++    if (d->VirtualAddress > view->size || d->Size > view->size - d->VirtualAddress) return FALSE;
++    while (at < d->Size)
++    {
++        IMAGE_BASE_RELOCATION *b;
++        unsigned j, i;
++        WORD *entries;
++        if (d->Size - at < sizeof(*b)) return FALSE;
++        b = (IMAGE_BASE_RELOCATION *)((char *)view->base + d->VirtualAddress + at);
++        if (!b->SizeOfBlock) break;
++        if (b->SizeOfBlock < sizeof(*b) || b->SizeOfBlock > d->Size - at || (b->SizeOfBlock & 1)) return FALSE;
++        entries = (WORD *)(b + 1);
++        for (j = 0; j < (b->SizeOfBlock - sizeof(*b)) / sizeof(WORD); j++)
++        {
++            unsigned type = entries[j] >> 12;
++            uint64_t rva = (uint64_t)b->VirtualAddress + (entries[j] & 0xfff);
++            uintptr_t target = (uintptr_t)view->base + rva;
++            unsigned width = type == IMAGE_REL_BASED_DIR64 ? 8 : 4;
++            if (!type) continue;
++            if (type != IMAGE_REL_BASED_DIR64 && type != IMAGE_REL_BASED_HIGHLOW) return FALSE;
++            if (rva > view->size || width > view->size - rva) return FALSE;
++            for (i = 0; i < PPIS_SLOTS; i++)
++            {
++                const struct ppis_slot *s = &ios_image_shared_slots[i];
++                if (s->owner == view && target < s->range.guest + s->range.size &&
++                    target + width > s->range.guest) return FALSE;
++            }
++        }
++        at += b->SizeOfBlock;
++    }
++    return TRUE;
++}
++
++static NTSTATUS ios_image_shared_activate( struct file_view *view )
++{
++    unsigned i;
++    if (!__atomic_load_n( &ios_image_shared_owned, __ATOMIC_RELAXED )) return STATUS_SUCCESS;
++    for (i = 0; i < PPIS_SLOTS; i++)
++    {
++        struct ppis_slot *s = &ios_image_shared_slots[i];
++        mach_vm_address_t alias = 0;
++        vm_prot_t cur = 0, max = 0;
++        if (s->owner != view) continue;
++        if (!(view->protect & VPROT_X64_IMAGE)) return STATUS_NOT_SUPPORTED;
++        if (mach_vm_remap( mach_task_self(), &alias, s->range.frame_size, 0, VM_FLAGS_ANYWHERE,
++                          mach_task_self(), s->range.frame, FALSE, &cur, &max, VM_INHERIT_NONE ))
++            return STATUS_NO_MEMORY;
++        s->range.private_alias = alias;
++        if (mach_vm_protect( mach_task_self(), alias, s->range.frame_size, FALSE, VM_PROT_READ | VM_PROT_WRITE ))
++            return STATUS_ACCESS_DENIED;
++    }
++    for (i = 0; i < PPIS_SLOTS; i++)
++    {
++        struct ppis_slot *s = &ios_image_shared_slots[i];
++        if (s->owner != view) continue;
++        __atomic_store_n( &s->epoch, ++ios_image_shared_epoch, __ATOMIC_RELEASE );
++        if (mprotect( (void *)s->range.frame, s->range.frame_size, PROT_NONE )) return STATUS_ACCESS_DENIED;
++    }
++    return STATUS_SUCCESS;
++}
++#endif
+diff --git a/build/ntdll-unix/pp_image_shared_signal.h b/build/ntdll-unix/pp_image_shared_signal.h
+new file mode 100644
+index 0000000..59ae8f8
+--- /dev/null
++++ b/build/ntdll-unix/pp_image_shared_signal.h
+@@ -0,0 +1,128 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later
++ * Included after signal_arm64_ios.c's ordinary access emulators. A per-TEB
++ * software exclusive reservation turns FEX's LDXR/STXR loops into true CAS
++ * operations on canonical shared bytes. No memcpy-based atomic substitutes.
++ */
++#ifndef PP_IMAGE_SHARED_SIGNAL_H
++#define PP_IMAGE_SHARED_SIGNAL_H
++#include "pp_image_shared.h"
++struct ppis_thread_reservation { uintptr_t teb; struct ppis_reservation value; };
++static struct ppis_thread_reservation ios_image_shared_reservations[256];
++
++static struct ppis_thread_reservation *ios_image_shared_reservation( uintptr_t teb )
++{
++    unsigned i;
++    if (!teb) return NULL;
++    for (i = 0; i < 256; i++)
++        if (__atomic_load_n( &ios_image_shared_reservations[i].teb, __ATOMIC_ACQUIRE ) == teb)
++            return &ios_image_shared_reservations[i];
++    for (i = 0; i < 256; i++)
++    {
++        uintptr_t empty = 0;
++        if (__atomic_compare_exchange_n( &ios_image_shared_reservations[i].teb, &empty, teb,
++                                         0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE ))
++            return &ios_image_shared_reservations[i];
++    }
++    return NULL;
++}
++
++/* 0 = unrelated fault, 1 = completed, -1 = this composite frame but declined.
++ * A declined shared-frame access must never fall through to the old private
++ * noaccess alias, which contains only the image-construction snapshot. */
++static int ios_image_shared_service( ucontext_t *ctx, void *fault_addr, uintptr_t teb )
++{
++    extern int ios_image_shared_acquire( uintptr_t, unsigned, struct ppis_range *, uint64_t * );
++    extern void ios_image_shared_release( int );
++    extern int ios_image_shared_access_allowed( uintptr_t, unsigned, int );
++    struct ppis_range range;
++    struct ppis_thread_reservation *reservation = NULL;
++    uintptr_t fault = (uintptr_t)fault_addr, addr, real;
++    uint64_t epoch, result = 0;
++    uint32_t insn = 0;
++    unsigned bytes = 0, rn, rm, kind;
++    int token, write = 0, ok = 0;
++    unsigned char scratch[32] __attribute__((aligned(16)));
++    size_t n, at;
++
++    token = ios_image_shared_acquire( fault, 1, &range, &epoch );
++    if (!token) return 0;
++    if (!ios_exc_read_insn( (uintptr_t)PC_sig(ctx), &insn )) goto declined;
++    kind = ppis_atomic_kind( insn );
++    if (kind)
++    {
++        unsigned masked = insn & 0x3ffffc00;
++        bytes = 1u << (insn >> 30);
++        write = masked != 0x085f7c00 && masked != 0x085ffc00 && masked != 0x08dffc00 && masked != 0x38bfc000;
++    }
++    else if (!ios_subfloor_classify( insn, &bytes, &write )) goto declined;
++    if (!bytes || bytes > sizeof(scratch)) goto declined;
++    rn = (insn >> 5) & 31; rm = (insn >> 16) & 31;
++    if (!ppis_address( insn, rn == 31 ? SP_sig(ctx) : ios_get_reg( ctx, rn ),
++                       ios_get_reg( ctx, rm ), &addr ) ||
++        addr < range.frame || addr - range.frame >= range.frame_size ||
++        bytes > range.frame_size - (addr - range.frame) ||
++        fault < addr || fault - addr >= bytes ||
++        !ios_image_shared_access_allowed( addr, bytes, write )) goto declined;
++    if (kind)
++    {
++        n = bytes;
++        real = ppis_route( &range, addr, &n );
++        if (!real || n != bytes) goto declined;
++        if ((insn & 0x3ffffc00) == 0x085f7c00 || (insn & 0x3ffffc00) == 0x085ffc00 ||
++            kind == PPIS_EXCLUSIVE_STORE)
++        {
++            reservation = ios_image_shared_reservation( teb );
++            if (!reservation) goto declined;
++        }
++        ok = ppis_atomic( insn, real, ios_get_reg( ctx, insn & 31 ),
++                           ios_get_reg( ctx, (insn >> 16) & 31 ), epoch,
++                           reservation ? &reservation->value : NULL, &result );
++        if (ok == PPIS_LOAD)
++            ios_ld_setreg( ctx, (insn & 0x3fa07c00) == 0x08a07c00 ? (insn >> 16) & 31 : insn & 31, result );
++        else if (ok == PPIS_EXCLUSIVE_STORE) ios_ld_setreg( ctx, (insn >> 16) & 31, result );
++        if (reservation && (kind == PPIS_EXCLUSIVE_STORE || !ok))
++        {
++            reservation->value.bytes = 0;
++            __atomic_store_n( &reservation->teb, 0, __ATOMIC_RELEASE );
++        }
++    }
++    else
++    {
++        /* Strong fences also cover FEX's unscaled acquire/release forms.
++         * Plain accesses crossing a private/shared boundary are gathered or
++         * scattered; atomic ones above are never split into separate writes. */
++        __atomic_thread_fence( __ATOMIC_SEQ_CST );
++        if (write)
++        {
++            memset( scratch, 0, sizeof(scratch) );
++            ok = ios_emulate_store_rel( ctx, insn, (uintptr_t)scratch ) ||
++                 ios_emulate_store( ctx, insn, (uintptr_t)scratch );
++        }
++        for (at = 0; (!write || ok) && at < bytes; at += n)
++        {
++            n = bytes - at;
++            real = ppis_route( &range, addr + at, &n );
++            if (!real || !n) { ok = 0; break; }
++            if (write) memcpy( (void *)real, scratch + at, n );
++            else memcpy( scratch + at, (void *)real, n );
++        }
++        if (!write && at == bytes) ok = ios_emulate_load( ctx, insn, (uintptr_t)scratch ) ||
++                                           ios_emulate_store_rel( ctx, insn, (uintptr_t)scratch ); /* SIMD pair load */
++        __atomic_thread_fence( __ATOMIC_SEQ_CST );
++    }
++    if (!ok) goto declined;
++    ios_subfloor_writeback( ctx, insn, addr );
++    ios_image_shared_release( token );
++    return 1;
++
++declined:
++    ios_image_shared_release( token );
++    {
++        static unsigned declined;
++        if (__atomic_fetch_add( &declined, 1, __ATOMIC_RELAXED ) < 16)
++            dprintf( 2, "[image-shared] declined access insn=%08x pc=%#llx fault=%#llx\n",
++                     insn, (unsigned long long)PC_sig(ctx), (unsigned long long)fault );
++    }
++    return -1;
++}
++#endif
+diff --git a/build/ntdll-unix/shims/mach/mach_vm.h b/build/ntdll-unix/shims/mach/mach_vm.h
+index 0cf2059..32373d2 100644
+--- a/build/ntdll-unix/shims/mach/mach_vm.h
++++ b/build/ntdll-unix/shims/mach/mach_vm.h
+@@ -10,4 +10,8 @@ extern kern_return_t mach_vm_read_overwrite(vm_map_t, mach_vm_address_t, mach_vm
+ extern kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t, mach_msg_type_number_t);
+ extern kern_return_t mach_vm_region(vm_map_t, mach_vm_address_t *, mach_vm_size_t *, vm_region_flavor_t, vm_region_info_t, mach_msg_type_number_t *, mach_port_t *);
+ extern kern_return_t mach_vm_protect(vm_map_t, mach_vm_address_t, mach_vm_size_t, boolean_t, vm_prot_t);
++extern kern_return_t mach_vm_deallocate(vm_map_t, mach_vm_address_t, mach_vm_size_t);
++extern kern_return_t mach_vm_remap(vm_map_t, mach_vm_address_t *, mach_vm_size_t, mach_vm_offset_t,
++                                 int, vm_map_t, mach_vm_address_t, boolean_t,
++                                 vm_prot_t *, vm_prot_t *, vm_inherit_t);
+ __END_DECLS
+diff --git a/build/ntdll-unix/signal_arm64_ios.c b/build/ntdll-unix/signal_arm64_ios.c
+index 38a15cf..07729b3 100644
+--- a/build/ntdll-unix/signal_arm64_ios.c
++++ b/build/ntdll-unix/signal_arm64_ios.c
+@@ -13055,8 +13055,12 @@ static int ios_subfloor_service( ucontext_t *ctx, void *fault_addr, uintptr_t wi
+  * itself is declined and raises the access violation, as on x64 Windows. */
+ static unsigned long long ios_noaccess_split_hits, ios_noaccess_split_declined, ios_noaccess_split_view_alias;
+ 
++#include "pp_image_shared_signal.h"
++
+ static int ios_noaccess_split_service( ucontext_t *ctx, void *fault_addr, uintptr_t teb )
+ {
++    int shared = ios_image_shared_service( ctx, fault_addr, teb );
++    if (shared) return shared > 0;
+     extern int ios_noaccess_split_access_allowed( unsigned long long va, unsigned int len, int is_write,
+                                                   int translator );
+     extern unsigned long long ios_code_alias_lookup( unsigned long long va, unsigned int len );
+diff --git a/build/ntdll-unix/virtual_ios.c b/build/ntdll-unix/virtual_ios.c
+index 64c0a95..4742eef 100644
+--- a/build/ntdll-unix/virtual_ios.c
++++ b/build/ntdll-unix/virtual_ios.c
+@@ -9707,6 +9707,9 @@ unsigned long long ios_code_alias_lookup( unsigned long long va, unsigned int le
+     return 0;
+ }
+ 
++static IMAGE_DATA_DIRECTORY *get_data_dir( IMAGE_NT_HEADERS *, SIZE_T, ULONG );
++#include "pp_image_shared_ios.h"
++
+ #endif
+ 
+ 
+@@ -10992,6 +10995,7 @@ static void delete_view( struct file_view *view ) /* [in] View */
+     ios_guest_release_range( view->base, view->size, 0 );
+     ios_swap_release_range( view->base, view->size, 0 );   /* ml1077 */
+ #ifdef WINE_IOS
++    ios_image_shared_drop( view );
+     ios_code_alias_drop( view );   /* Playport (PLA-516) */
+ #endif
+     if (!(view->protect & VPROT_SYSTEM)) unmap_area( view->base, view->size );
+@@ -13508,6 +13512,7 @@ static int mprotect_range( void *base, size_t size, BYTE set, BYTE clear )
+                          get_unix_prot( (vprot & ~clear) | set ) & host_exec_mask;
+ #ifdef WINE_IOS
+     if (!guest_image && !set && !clear && (prot & PROT_WRITE) && ios_host_page_split( addr )) prot &= ~PROT_WRITE;
++    if (ios_image_shared_frame( addr )) prot = PROT_NONE;
+     if (!guest_image && !set && !clear && prot && ios_host_page_noaccess_split( addr ))
+     {
+         prot = PROT_NONE;
+@@ -13523,6 +13528,7 @@ static int mprotect_range( void *base, size_t size, BYTE set, BYTE clear )
+ #ifdef WINE_IOS
+         if (!guest_image && !set && !clear && (next & PROT_WRITE) && ios_host_page_split( addr + count * host_page_size ))
+             next &= ~PROT_WRITE;
++        if (ios_image_shared_frame( addr + count * host_page_size )) next = PROT_NONE;
+         if (!guest_image && !set && !clear && next && ios_host_page_noaccess_split( addr + count * host_page_size ))
+         {
+             next = PROT_NONE;
+@@ -16704,12 +16710,18 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
+         if ((sec[i].Characteristics & IMAGE_SCN_MEM_SHARED) &&
+             (sec[i].Characteristics & IMAGE_SCN_MEM_WRITE))
+         {
++            NTSTATUS shared_status;
+             TRACE_(module)( "%s mapping shared section %.8s at %p off %x (%x) size %lx (%lx) flags %x\n",
+                             debugstr_us(nt_name), sec[i].Name, ptr + sec[i].VirtualAddress,
+                             sec[i].PointerToRawData, (int)pos, file_size, map_size,
+                             sec[i].Characteristics );
+-            if (map_file_into_view( view, shared_fd, sec[i].VirtualAddress, map_size, pos,
+-                                    VPROT_COMMITTED | VPROT_READ | VPROT_WRITE, FALSE ) != STATUS_SUCCESS)
++            shared_status = map_file_into_view( view, shared_fd, sec[i].VirtualAddress, map_size, pos,
++                                                VPROT_COMMITTED | VPROT_READ | VPROT_WRITE, FALSE );
++#ifdef WINE_IOS
++            if (shared_status == STATUS_INVALID_PARAMETER)
++                shared_status = ios_image_shared_map( view, shared_fd, nt, sec, i, map_size, pos, header_map_size );
++#endif
++            if (shared_status != STATUS_SUCCESS)
+             {
+                 ERR_(module)( "Could not map %s shared section %.8s\n", debugstr_us(nt_name), sec[i].Name );
+                 do { IOS_IMG_FAIL(8); goto done; } while (0);
+@@ -16779,6 +16791,14 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
+         if (image_info->machine == IMAGE_FILE_MACHINE_AMD64)
+             update_arm64ec_ranges( view, nt, dir, &image_info->entry_point );
+     }
++#endif
++#ifdef WINE_IOS
++    if (!ios_image_shared_fixups_safe( view, nt, image_info->map_addr && image_info->map_addr != image_info->base ))
++    {
++        dprintf( 2, "[image-shared] unsupported relocation or native-code overlap; mapping declined\n" );
++        status = STATUS_NOT_SUPPORTED;
++        goto done;
++    }
+ #endif
+     /* sections mapped OK */
+     if (machine && machine != nt->FileHeader.Machine)
+@@ -16941,6 +16961,9 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
+     }
+ #endif
+ 
++#ifdef WINE_IOS
++    if ((status = ios_image_shared_activate( view ))) goto done;
++#endif
+     /* set the image protections */
+ 
+     if (!set_vprot( view, ptr, ROUND_SIZE( 0, header_size, align_mask ), VPROT_COMMITTED | VPROT_READ ) &&
+@@ -17023,6 +17046,9 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
+ #endif
+ 
+ done:
++#ifdef WINE_IOS
++    if (status) ios_image_shared_drop( view );
++#endif
+     free( sections );
+     return status;
+ }
+-- 
+2.56.0.windows.2
+

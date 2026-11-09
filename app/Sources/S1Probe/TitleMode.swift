@@ -73,6 +73,7 @@ final class TitleLaunch: ObservableObject {
     /// then the launch on its own thread. False when a launch is running or spent.
     @discardableResult
     func start(title: String, titleID: String? = nil, exe: String, args: [String], config: [String: String] = [:],
+               configRemovals: Set<String> = [],
                screen: String? = nil, frameLimit: Int = 0, graphics: GraphicsBackend = .default,
                graphicsEnvironment: [String: String] = [:], steamAppID: UInt32? = nil,
                fex: FEXProfile.Launch? = nil, steamAPI: LaunchCoordinator.SteamAPI? = nil,
@@ -113,6 +114,7 @@ final class TitleLaunch: ObservableObject {
             TitleMode.log("prerequisites: no restart before the game (\(why)); any that run share the game's session")
         }
         let request = LaunchCoordinator.Request(exe: exe, args: args, config: config,
+                                                configRemovals: configRemovals,
                                                 steamAppID: steamAppID, graphics: graphics,
                                                 graphicsEnvironment: graphicsEnvironment, fex: fex, jitWait: 180, steamAPI: steamAPI,
                                                 memory: memory, epic: epic, title: title, galaxy: galaxy,

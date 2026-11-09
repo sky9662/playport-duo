@@ -30,11 +30,18 @@ public enum TitleConfig {
     }
 
     /// The shared file's text, then the title's keys in key order.
-    public static func merged(shared: String?, config: [String: String], title: String) -> String {
+    public static func merged(shared: String?, config: [String: String], title: String,
+                              removing: Set<String> = []) -> String {
         var out = shared ?? ""
+        if !removing.isEmpty {
+            out = out.components(separatedBy: "\n").filter { line in
+                guard let eq = line.firstIndex(of: "=") else { return true }
+                return !removing.contains(String(line[..<eq]).trimmingCharacters(in: .whitespacesAndNewlines))
+            }.joined(separator: "\n")
+        }
         if !out.isEmpty, !out.hasSuffix("\n") { out += "\n" }
         out += "# Playport: \(title)'s own keys, after the shared file; the last line for a key wins.\n"
-        for k in config.keys.sorted() { out += "\(k) = \(config[k]!)\n" }
+        for k in config.keys.sorted() where !removing.contains(k) { out += "\(k) = \(config[k]!)\n" }
         return out
     }
 
@@ -54,14 +61,15 @@ public enum TitleConfig {
     /// (absent: empty) and the title's keys; returns the directory for MADEIRA_DOCS_DIR.
     @discardableResult
     public static func prepare(shared: URL, documents: URL, exe: String, config: [String: String],
-                               title: String) throws -> URL {
+                               title: String, removing: Set<String> = []) throws -> URL {
         try validate(config)
+        try validate(Dictionary(uniqueKeysWithValues: removing.map { ($0, "") }))
         let dir = documents.appendingPathComponent(rootName, isDirectory: true)
             .appendingPathComponent(directoryName(exe: exe), isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let text = (try? Data(contentsOf: shared.appendingPathComponent(fileName)))
             .map { String(decoding: $0, as: UTF8.self) }
-        try Data(merged(shared: text, config: config, title: title).utf8)
+        try Data(merged(shared: text, config: config, title: title, removing: removing).utf8)
             .write(to: dir.appendingPathComponent(fileName), options: .atomic)
         return dir
     }

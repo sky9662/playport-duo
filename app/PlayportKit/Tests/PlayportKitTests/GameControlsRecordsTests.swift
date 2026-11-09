@@ -4,6 +4,23 @@ import XCTest
 
 /// GameControlsRecords: `controls.games` read record by record (S1Probe ControlsStore).
 final class GameControlsRecordsTests: XCTestCase {
+    func testSensitivityEditsAndResetKeepUnknownFields() throws {
+        let stored = Data(#"{"app-1":{"futurePointerMode":{"enabled":true},"lookSpeed":2}}"#.utf8)
+        var records = try XCTUnwrap(GameControlsRecords(json: stored))
+        var game = try XCTUnwrap(records["app-1"])
+        game.mouseSensitivity = 0.25
+        records.set("app-1", game)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: records.json()) as? [String: [String: Any]])
+        XCTAssertEqual(object["app-1"]?["lookSpeed"] as? Double, 2)
+        XCTAssertEqual(object["app-1"]?["mouseSensitivity"] as? Double, 0.25)
+        XCTAssertEqual((object["app-1"]?["futurePointerMode"] as? [String: Bool])?["enabled"], true)
+        records.set("app-1", GameControls())
+        object = try XCTUnwrap(JSONSerialization.jsonObject(with: records.json()) as? [String: [String: Any]])
+        XCTAssertNil(object["app-1"]?["lookSpeed"])
+        XCTAssertNil(object["app-1"]?["mouseSensitivity"])
+        XCTAssertEqual((object["app-1"]?["futurePointerMode"] as? [String: Bool])?["enabled"], true)
+    }
+
     /// A later build's layout (unknown here) and a typo beside two good records.
     let stored = Data(#"""
     {"app-367520":{"layout":"off","opacity":0.5},

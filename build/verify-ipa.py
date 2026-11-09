@@ -440,7 +440,8 @@ HOST_IO_EXPORTS = ["_macdrv_functions", "_get_win_data", "_release_win_data", "_
 HOST_IO_DEFINED = ["_madeira_display_set_layer", "_winios_post_client_pointer", "_winios_post_focus",
                    "_ios_audio_host_suspend", "_winemetal_host_gpu_gate", "_host_pad_set",
                    "_winios_gamepad_set_state", "_winios_gamepad_get_state", "_ios_gamepad_query",
-                   "_audio_null_ios_unix_call_funcs"]
+                   "_audio_null_ios_unix_call_funcs", "_host_game_display_capacity_set",
+                   "_host_game_display_capacity_get"]
 
 
 def libcxx_newer_checks(app):
@@ -769,6 +770,9 @@ def main():
         check(m["cpu"] == 0x0100000c and m["ftype"] == 2, "executable: arm64 MH_EXECUTE")
         check(m["flags"] & 1 == 1, "executable: NOUNDEFS")
         plat, minos, sdk = m["build"]
+        check((sdk >> 16, (sdk >> 8) & 0xff) >= (27, 1),
+              f"Duo executable uses iOS SDK {ver(sdk)} (requires 27.1 or later)")
+        check(isinstance(info.get("UILaunchScreen"), dict), "Duo app declares a launch screen")
         check(plat == 2 and ver(minos) == info.get("MinimumOSVersion"), f"executable: platform iOS, minos {ver(minos)} (sdk {ver(sdk)}); Info.plist MinimumOSVersion {info.get('MinimumOSVersion')}")
         check(m.get("cryptid", 0) == 0, "executable: cryptid 0")
         sysp = ("/System/Library/", "/usr/lib/")

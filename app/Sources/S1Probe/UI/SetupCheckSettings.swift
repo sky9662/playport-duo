@@ -205,11 +205,11 @@ struct SetupCheckSettings: View {
     // MARK: memory
 
     @ViewBuilder private var memoryRows: some View {
-        SettingsInfoRow(id: "setup:memory", title: "Memory limit", subtitle: "For a game and Playport's JIT memory together",
+        SettingsInfoRow(id: "setup:memory", title: "Estimated memory limit", subtitle: "Current iOS budget for the game and Playport together",
                         value: reading.effectiveMB.map { MemoryNeed.format(mb: $0) } ?? "Not reported")
         SettingsInfoRow(id: "setup:iml", title: "Increased Memory Limit",
                         subtitle: reading.entitled == false ? "This copy was signed without it" : nil,
-                        value: reading.entitled.map { $0 ? "On" : "Off" } ?? "Unknown")
+                        value: reading.entitled.map { $0 ? "Present in signature" : "Not in signature" } ?? "Unknown")
         SettingsInfoRow(id: "setup:pool", title: "JIT memory", value: MemoryNeed.format(mb: MemoryLimit.poolMB(reading).mb))
         #if !PLAYPORT_RELEASE
         if reading.simulatedMB != nil {

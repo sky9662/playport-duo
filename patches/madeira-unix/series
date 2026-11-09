@@ -253,3 +253,8 @@
 0284-signal-virtual-read-stubs-follow-FEX-s-code-buffers-.patch
 0285-loader-ntdll-s-native-code-reads-KUSER_SHARED_DATA-w.patch
 0286-signal-print-a-SEGV-that-virtual_handle_fault-declin.patch
+0287-win32u-publish-the-actual-game-cursor.patch
+0288-virtual-service-small-image-shared-pages-through-aliases.patch
+0289-virtual-make-small-shared-image-compatibility-adjustable.patch
+0290-win32u-include-four-three-resolution-levels.patch
+0291-win32u-refresh-scene-mode-capacity.patch

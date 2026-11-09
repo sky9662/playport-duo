@@ -760,7 +760,7 @@ private struct GameDetailPage: View {
         if model.cloudErrors[app] != nil { return ("Not synced", .orange) }
         guard let c = model.cloud[app] else { return ("Not synced yet", nil) }
         if !c.conflicts.isEmpty { return ("\(c.conflicts.count) to settle", .orange) }
-        if !c.failed.isEmpty { return ("\(c.failed.count) not synced", .orange) }
+        if !c.failed.isEmpty { return ("\(c.failed.count) file\(c.failed.count == 1 ? "" : "s") not synced", .orange) }
         return ("Up to date", PP.ok)
     }
 
@@ -962,6 +962,8 @@ private struct GameDetailPage: View {
     @ViewBuilder
     private func gameRows(_ t: InstalledTitle, _ g: SteamGame?) -> some View {
         let settings = launchSettings.binding(for: t.id)
+        GameCompatibilityRows(gameID: t.id)
+        PointerSensitivityRows(gameID: t.id)
         PadSectionHeader(text: "Game").id("game")
         if let g, t.source == .installed, branches.count > 1 {
             PadRow(id: "opt:version", title: "Version", value: BranchLabel.text(t.branch, in: g.info), accessory: .chevron,
@@ -986,6 +988,19 @@ private struct GameDetailPage: View {
                        value: "Choose", accessory: .chevron, style: .plain, hint: "Choose") {
                     guard !model.cloudSyncing.contains(app), !launch.running else { return }
                     library.askCloud(t, app, c.conflicts, thenPlay: false)
+                }
+            }
+        }
+        if let app = t.appID, let sync = model.cloud[app], !sync.failed.isEmpty {
+            PadRow(id: "opt:cloudFailure", title: "Cloud sync issue",
+                   subtitle: sync.failed.values.sorted().first, subtitleLines: 3,
+                   value: "\(sync.failed.count) file\(sync.failed.count == 1 ? "" : "s") not synced", accessory: .chevron, style: .plain, hint: "Details") {
+                let reasons = Array(Set(sync.failed.values)).sorted().prefix(3).joined(separator: "\n")
+                PadModal.shared.picker(title: "Cloud saves not synced", context: t.name,
+                                       note: reasons + "\nExisting saves are kept. Retry after resolving the reported issue.",
+                                       options: [PadOption(id: "retry", label: "Retry sync"), PadOption(id: "close", label: "Close")],
+                                       selected: "close") { choice in
+                    if choice == "retry" { Task { await model.syncCloud(app) } }
                 }
             }
         }
@@ -1120,7 +1135,7 @@ private struct GameDetailPage: View {
         if model.cloudSyncing.contains(app) { return "Syncing saves…" }
         if let e = model.cloudErrors[app] { return "Not synced: " + e }
         guard let c = model.cloud[app] else { return nil }
-        var s = "Synced " + c.at.formatted(date: .omitted, time: .shortened)
+        var s = (c.failed.isEmpty && c.conflicts.isEmpty ? "Synced " : "Last attempt ") + c.at.formatted(date: .omitted, time: .shortened)
         if !c.downloaded.isEmpty || !c.uploaded.isEmpty { s += " · \(c.downloaded.count) from Steam, \(c.uploaded.count) to Steam" }
         if !c.failed.isEmpty { s += " · \(c.failed.count) failed" }
         return s

@@ -156,6 +156,8 @@ public struct ControlsDefaults: Equatable, Sendable {
     public var rightStick = OnScreenRightStick.off
     public var controllerMap = ControllerMap()
     public var lookSpeed = LookSpeed.defaultValue
+    public var trackpadSensitivity = 1.0
+    public var mouseSensitivity = 1.0
     /// Every game's layout unless it has its own or a compatibility default; nil: the game's
     /// suggestion (its compatibility default, else Gamepad).
     public var startingLayout: OnScreenLayout?
@@ -178,6 +180,8 @@ public struct ControlsDefaults: Equatable, Sendable {
         controllerMap = ControllerMap(defaults)
         // A number, or a String that reads as one (the driver's `set:controls.lookSpeed=1.5`).
         lookSpeed = LookSpeed.kept(GyroSettings.number(defaults, Self.lookSpeedKey)) ?? LookSpeed.defaultValue
+        trackpadSensitivity = PointerSensitivity.kept(GyroSettings.number(defaults, PointerSensitivity.trackpadKey)) ?? 1
+        mouseSensitivity = PointerSensitivity.kept(GyroSettings.number(defaults, PointerSensitivity.mouseKey)) ?? 1
         startingLayout = defaults.string(forKey: Self.startingLayoutKey).flatMap(OnScreenLayout.init(rawValue:))
             .flatMap { OnScreenLayout.startingChoices.contains($0) ? $0 : nil }
     }
@@ -206,6 +210,8 @@ public struct GameControls: Codable, Equatable, Sendable {
     public var gyro: GameGyro?
     public var controllerMap: ControllerMap?
     public var lookSpeed: Double?
+    public var trackpadSensitivity: Double?
+    public var mouseSensitivity: Double?
     public var layouts: [OnScreenLayout: ControlLayout]
 
     public init(layout: OnScreenLayout? = nil, opacity: Double? = nil, dpad: OnScreenDpad? = nil,
@@ -215,7 +221,7 @@ public struct GameControls: Codable, Equatable, Sendable {
         self.controllerMap = controllerMap; self.lookSpeed = lookSpeed; self.layouts = layouts
     }
 
-    enum CodingKeys: String, CodingKey { case layout, opacity, dpad, rightStick, gyro, controllerMap, lookSpeed, layouts }
+    enum CodingKeys: String, CodingKey, CaseIterable { case layout, opacity, dpad, rightStick, gyro, controllerMap, lookSpeed, trackpadSensitivity, mouseSensitivity, layouts }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -226,6 +232,8 @@ public struct GameControls: Codable, Equatable, Sendable {
         gyro = try c.decodeIfPresent(GameGyro.self, forKey: .gyro)
         controllerMap = (try? c.decodeIfPresent(ControllerMap.self, forKey: .controllerMap)) ?? nil
         lookSpeed = try c.decodeIfPresent(Double.self, forKey: .lookSpeed)
+        trackpadSensitivity = try c.decodeIfPresent(Double.self, forKey: .trackpadSensitivity)
+        mouseSensitivity = try c.decodeIfPresent(Double.self, forKey: .mouseSensitivity)
         layouts = [:]
         for (name, l) in try c.decodeIfPresent([String: ControlLayout].self, forKey: .layouts) ?? [:] {
             guard let preset = OnScreenLayout(rawValue: name), preset != .off else {
@@ -244,6 +252,8 @@ public struct GameControls: Codable, Equatable, Sendable {
         try c.encodeIfPresent(gyro, forKey: .gyro)
         try c.encodeIfPresent(controllerMap, forKey: .controllerMap)
         try c.encodeIfPresent(lookSpeed, forKey: .lookSpeed)
+        try c.encodeIfPresent(trackpadSensitivity, forKey: .trackpadSensitivity)
+        try c.encodeIfPresent(mouseSensitivity, forKey: .mouseSensitivity)
         if !layouts.isEmpty {
             try c.encode(Dictionary(uniqueKeysWithValues: layouts.map { ($0.key.rawValue, $0.value) }), forKey: .layouts)
         }
@@ -251,7 +261,7 @@ public struct GameControls: Codable, Equatable, Sendable {
 
     public var isEmpty: Bool {
         layout == nil && opacity == nil && dpad == nil && rightStick == nil && (gyro?.isEmpty ?? true) && controllerMap == nil
-            && lookSpeed == nil && layouts.isEmpty
+            && lookSpeed == nil && trackpadSensitivity == nil && mouseSensitivity == nil && layouts.isEmpty
     }
 
     /// The game's controller map, else the default.
@@ -259,6 +269,14 @@ public struct GameControls: Codable, Equatable, Sendable {
 
     /// The game's look speed when it is in range, else the default.
     public func lookSpeed(over defaults: ControlsDefaults) -> Double { LookSpeed.kept(lookSpeed) ?? defaults.lookSpeed }
+
+    public func trackpadSensitivity(over defaults: ControlsDefaults) -> Double {
+        PointerSensitivity.kept(trackpadSensitivity) ?? defaults.trackpadSensitivity
+    }
+
+    public func mouseSensitivity(over defaults: ControlsDefaults) -> Double {
+        PointerSensitivity.kept(mouseSensitivity) ?? defaults.mouseSensitivity
+    }
 
     /// The same, with a gyro that sets nothing dropped (what the store saves).
     public var normalized: GameControls {

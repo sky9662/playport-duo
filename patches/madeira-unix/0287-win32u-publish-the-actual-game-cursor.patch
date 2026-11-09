@@ -1,0 +1,187 @@
+From c2e6a1ea98b606c481f171354525b69b7dc8bf5e Mon Sep 17 00:00:00 2001
+From: Local cursor investigation <local@example.invalid>
+Date: Wed, 4 Nov 2026 10:05:49 +0800
+Subject: [PATCH] win32u: publish the actual game cursor
+
+Connect the game path to the host cursor renderer without enabling the desktop compositor.
+
+Class: host-app
+Evidence: app/tests/cursor_test.c; host bridge checks; iOS compile and phone gate not run
+Offered-upstream: no; local uncompiled candidate
+---
+ build/win32u-unix/driver_ios.c | 97 ++++++++++++++++++++++++++++------
+ 1 file changed, 81 insertions(+), 16 deletions(-)
+
+diff --git a/build/win32u-unix/driver_ios.c b/build/win32u-unix/driver_ios.c
+index 6db315c..5af0382 100644
+--- a/build/win32u-unix/driver_ios.c
++++ b/build/win32u-unix/driver_ios.c
+@@ -293,13 +293,70 @@ extern void winios_cursor_show( int show ) __attribute__((weak));
+ 
+ static int winios_desktop_mode(void);
+ 
++/* Playport: sample authoritative RAW desktop pixels after the input drain.
++ * GetCursorPos would apply the calling thread's DPI virtualization. Read the
++ * desktop snapshot instead and transform the client rect to the same space.
++ * This handles Wine acceleration/clipping, hardware mice and guest warps.
++ * Never call into Wine from UIKit or integrate a second position in Swift. */
++extern void host_game_cursor_position(int, int, int, int, int, int) __attribute__((weak));
++static void winios_drv_sync_cursor(void)
++{
++    static __thread int sampling;
++    struct object_lock lock = OBJECT_LOCK_INIT;
++    const desktop_shm_t *desktop_shm;
++    NTSTATUS status;
++    HWND fg;
++    RECT client;
++    int x = 0, y = 0;
++    if (sampling || winios_desktop_mode() || !host_game_cursor_position) return;
++    sampling = 1;
++    fg = NtUserGetForegroundWindow();
++    if (!fg || fg == get_desktop_window() ||
++        !get_client_rect_rel(fg, COORDS_SCREEN, &client, get_thread_dpi())) goto hidden;
++    client = map_rect_virt_to_raw(client, get_thread_dpi());
++    while ((status = get_shared_desktop(&lock, &desktop_shm)) == STATUS_PENDING)
++    {
++        x = desktop_shm->cursor.x;
++        y = desktop_shm->cursor.y;
++    }
++    if (status) goto hidden;
++    host_game_cursor_position(x, y, client.left, client.top,
++                             client.right - client.left, client.bottom - client.top);
++    sampling = 0;
++    return;
++hidden:
++    host_game_cursor_position(0, 0, 0, 0, 0, 0);
++    sampling = 0;
++}
++
++static BOOL winios_drv_process_events(DWORD mask)
++{
++    BOOL result = winios_pProcessEvents(mask);
++    winios_drv_sync_cursor();
++    return result;
++}
++
++static BOOL winios_drv_set_cursor_pos(INT x, INT y)
++{
++    /* NtUserSetCursorPos has already committed/clipped the server position. */
++    winios_drv_sync_cursor();
++    return TRUE;
++}
++
++static HCURSOR winios_last_cursor;
++static void winios_drv_destroy_cursor(HCURSOR cursor)
++{
++    if (cursor == winios_last_cursor) winios_last_cursor = NULL;
++    if (winios_pDestroyCursorIcon) winios_pDestroyCursorIcon(cursor);
++}
++
++
+ /* pSetCursor: extract the cursor image as straight-alpha BGRA and forward
+  * to the app-side compositor cursor layer. win32u calls this on every
+  * cursor CHANGE (WM_SETCURSOR → NtUserSetCursor), so resize arrows,
+  * I-beam and app cursors all arrive here. */
+ static void winios_drv_set_cursor( HWND hwnd, HCURSOR cursor )
+ {
+-    static HCURSOR last_cursor;
+     ICONINFO info = {0};
+     BITMAP bm;
+     HDC hdc;
+@@ -308,17 +365,24 @@ static void winios_drv_set_cursor( HWND hwnd, HCURSOR cursor )
+     char bmibuf[sizeof(BITMAPINFOHEADER) + 256 * sizeof(RGBQUAD)];
+     BITMAPINFO *bmi = (BITMAPINFO *)bmibuf;
+ 
+-    if (!winios_desktop_mode() || !winios_cursor_set) return;
++    if (!winios_cursor_set) return;
++    winios_drv_sync_cursor();
+     if (!cursor)
+     {
+         if (winios_cursor_show) winios_cursor_show( 0 );
+         return;
+     }
+-    if (winios_cursor_show) winios_cursor_show( 1 );
+-    if (cursor == last_cursor) return;
++    if (winios_desktop_mode() && cursor == winios_last_cursor)
++    {
++        if (winios_cursor_show) winios_cursor_show(1);
++        return;
++    }
++    /* Do not leave a previous image visible if this image cannot be decoded. */
++    if (winios_cursor_show) winios_cursor_show(0);
+ 
+     if (!NtUserGetIconInfo( cursor, &info, NULL, NULL, NULL, 0 )) return;
+     hdc = NtGdiCreateCompatibleDC( 0 );
++    if (!hdc) goto done;
+ 
+ #define WINIOS_BMI_INIT(width, height) do { \
+         memset( bmibuf, 0, sizeof(bmibuf) ); \
+@@ -337,16 +401,16 @@ static void winios_drv_set_cursor( HWND hwnd, HCURSOR cursor )
+         if (w <= 0 || h <= 0 || w > 256 || h > 256) goto done;
+         if (!(color = malloc( (size_t)w * h * 4 ))) goto done;
+         WINIOS_BMI_INIT( w, h );
+-        NtGdiGetDIBitsInternal( hdc, info.hbmColor, 0, h, color, bmi, DIB_RGB_COLORS,
+-                                w * h * 4, sizeof(bmibuf) );
++        if (!NtGdiGetDIBitsInternal( hdc, info.hbmColor, 0, h, color, bmi, DIB_RGB_COLORS,
++                                w * h * 4, sizeof(bmibuf) )) goto done;
+         for (i = 0; i < w * h; i++) if (color[i] & 0xff000000) { has_alpha = 1; break; }
+         if (!has_alpha)
+         {
+             /* no alpha channel — derive from the AND mask (0 = opaque) */
+             if (!(mask = malloc( (size_t)w * h * 4 ))) goto done;
+             WINIOS_BMI_INIT( w, h );
+-            NtGdiGetDIBitsInternal( hdc, info.hbmMask, 0, h, mask, bmi, DIB_RGB_COLORS,
+-                                    w * h * 4, sizeof(bmibuf) );
++            if (!NtGdiGetDIBitsInternal( hdc, info.hbmMask, 0, h, mask, bmi, DIB_RGB_COLORS,
++                                    w * h * 4, sizeof(bmibuf) )) goto done;
+             for (i = 0; i < w * h; i++)
+                 color[i] = (color[i] & 0xffffff) | ((mask[i] & 0xffffff) ? 0 : 0xff000000);
+         }
+@@ -358,8 +422,8 @@ static void winios_drv_set_cursor( HWND hwnd, HCURSOR cursor )
+         if (w <= 0 || h <= 0 || w > 256 || h > 256) goto done;
+         if (!(mask = malloc( (size_t)w * h * 2 * 4 ))) goto done;
+         WINIOS_BMI_INIT( w, h * 2 );
+-        NtGdiGetDIBitsInternal( hdc, info.hbmMask, 0, h * 2, mask, bmi, DIB_RGB_COLORS,
+-                                w * h * 2 * 4, sizeof(bmibuf) );
++        if (!NtGdiGetDIBitsInternal( hdc, info.hbmMask, 0, h * 2, mask, bmi, DIB_RGB_COLORS,
++                                w * h * 2 * 4, sizeof(bmibuf) )) goto done;
+         if (!(color = malloc( (size_t)w * h * 4 ))) goto done;
+         for (i = 0; i < w * h; i++)
+         {
+@@ -374,7 +438,8 @@ static void winios_drv_set_cursor( HWND hwnd, HCURSOR cursor )
+ 
+     winios_cursor_set( (unsigned int)(UINT_PTR)cursor, w, h,
+                        (int)info.xHotspot, (int)info.yHotspot, color );
+-    last_cursor = cursor;
++    if (winios_desktop_mode()) winios_last_cursor = cursor;
++    if (winios_cursor_show) winios_cursor_show(1);
+     dprintf( 2, "[winios] cursor set hcursor=%p %dx%d hot=(%u,%u)\n",
+              cursor, w, h, (unsigned)info.xHotspot, (unsigned)info.yHotspot );
+ 
+@@ -383,7 +448,7 @@ done:
+     free( mask );
+     if (info.hbmColor) NtGdiDeleteObjectApp( info.hbmColor );
+     if (info.hbmMask) NtGdiDeleteObjectApp( info.hbmMask );
+-    NtGdiDeleteObjectApp( hdc );
++    if (hdc) NtGdiDeleteObjectApp( hdc );
+ }
+ 
+ static int winios_desktop_mode(void)
+@@ -2149,10 +2214,10 @@ static void load_display_driver(void)
+          * in app/Madeira/Winios/Winios.m and link in via Madeira.app. */
+         if (winios_pCreateWindow)        winios_user_driver.pCreateWindow        = winios_pCreateWindow;
+         if (winios_pDestroyWindow)       winios_user_driver.pDestroyWindow       = winios_pDestroyWindow;
+-        if (winios_pProcessEvents)       winios_user_driver.pProcessEvents       = winios_pProcessEvents;
+-        if (winios_desktop_mode())       winios_user_driver.pSetCursor           = winios_drv_set_cursor;
+-        else if (winios_pSetCursor)      winios_user_driver.pSetCursor           = winios_pSetCursor;
+-        if (winios_pDestroyCursorIcon)   winios_user_driver.pDestroyCursorIcon   = winios_pDestroyCursorIcon;
++        if (winios_pProcessEvents)       winios_user_driver.pProcessEvents       = winios_drv_process_events;
++        winios_user_driver.pSetCursor = winios_drv_set_cursor;
++        winios_user_driver.pSetCursorPos = winios_drv_set_cursor_pos;
++        winios_user_driver.pDestroyCursorIcon = winios_drv_destroy_cursor;
+         if (winios_pShowWindow)          winios_user_driver.pShowWindow          = winios_pShowWindow;
+         /* window-pos wrapper dereferences window_rects on this side and
+          * forwards plain ints to Winios.m's layer compositor */
+-- 
+2.53.0.windows.3
+

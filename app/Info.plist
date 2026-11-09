@@ -24,6 +24,8 @@
 	</array>
 	<key>CFBundleDisplayName</key>
 	<string>Playport</string>
+	<key>UILaunchScreen</key>
+	<dict/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<!-- The app delegate narrows these per launch: landscape for a title, portrait otherwise. -->

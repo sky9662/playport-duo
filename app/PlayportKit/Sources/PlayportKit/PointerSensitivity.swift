@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+/// Independent multipliers for touch trackpad motion and ordinary relative mouse motion.
+/// Absolute placement, scrolling, controller look and gyro keep their own units.
+public enum PointerSensitivity {
+    public static let trackpadKey = "controls.trackpadSensitivity"
+    public static let mouseKey = "controls.mouseSensitivity"
+    public static let steps: [Double] = [0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
+    public static func kept(_ value: Double?) -> Double? {
+        value.flatMap { $0.isFinite && (0.1...4).contains($0) ? $0 : nil }
+    }
+    public static func label(_ value: Double) -> String { "\(Int((value * 100).rounded()))%" }
+}

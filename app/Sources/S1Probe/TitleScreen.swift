@@ -24,6 +24,7 @@ enum TitleScreen {
 
     /// Whether startDisplayLink ran: configure may run again for a later title.
     @MainActor private static var linked = false
+    @MainActor private static var screenSpec: String?
 
     /// On the main thread, before the runtime reads its environment; again
     /// for each title a process starts, since the environment it sets is only
@@ -32,9 +33,11 @@ enum TitleScreen {
     /// `frameLimit` the player's limit, 0 for none.
     @MainActor
     static func configure(title: String? = nil, frameLimit: Int = 0) {
-        let px = UIScreen.main.nativeBounds.size
+        screenSpec = title
+        let px = SceneDisplay.pixelSize
         let screen: String
         if let (w, h) = Display.guestSize(panelLong: Int(px.width), panelShort: Int(px.height), spec: title) {
+            host_game_display_capacity_set(Int32(w), Int32(h))
             setenv("MADEIRA_SCREEN_W", String(w), 1)
             setenv("MADEIRA_SCREEN_H", String(h), 1)
             screen = "\(w)x\(h)" + (title.map { " (the title's screen \($0))" } ?? "")
@@ -44,7 +47,7 @@ enum TitleScreen {
         madeira_set_vsync_locked(0)
         PacedMetalLayer.limit(fps: frameLimit)
         // The refresh the guest's monitor reports (patches/madeira-unix/0011-win32u-report-the-host-panel-s-refresh-rate-for-the-.patch).
-        let hz = UIScreen.main.maximumFramesPerSecond
+        let hz = SceneDisplay.maximumRate
         setenv("MADEIRA_SCREEN_HZ", String(hz), 0)
         if !linked {
             linked = true
@@ -56,13 +59,23 @@ enum TitleScreen {
             + ", guest monitor \(ProcessInfo.processInfo.environment["MADEIRA_SCREEN_HZ"] ?? "60") Hz"
     }
 
+    /// Folding changes available modes, not the mode the game chose. Wine
+    /// enumerates this capacity on demand; its current mode stays until the game changes it.
+    @MainActor static func updateCapacity(view: UIView) {
+        guard linked, let screen = view.window?.windowScene?.screen else { return }
+        let size = view.bounds.size
+        guard let (w, h) = Display.guestSize(panelLong: Int(size.width * screen.nativeScale),
+                                           panelShort: Int(size.height * screen.nativeScale), spec: screenSpec) else { return }
+        host_game_display_capacity_set(Int32(w), Int32(h))
+    }
+
     /// ProMotion keeps a CAMetalLayer at 60 Hz unless the app asks for more:
     /// CADisableMinimumFrameDurationOnPhone (Info.plist) and a display link's
     /// preferred range. The link does no work; it only states the rate.
     @MainActor
     private static func startDisplayLink() {
         let link = CADisplayLink(target: Tick.shared, selector: #selector(Tick.tick))
-        let top = Float(UIScreen.main.maximumFramesPerSecond)
+        let top = Float(SceneDisplay.maximumRate)
         link.preferredFrameRateRange = CAFrameRateRange(minimum: min(60, top), maximum: top, preferred: top)
         link.add(to: .main, forMode: .common)
     }

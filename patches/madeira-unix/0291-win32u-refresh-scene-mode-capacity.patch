@@ -1,0 +1,64 @@
+From 9b8221db63d27ec1fdeaa14412c5ce12bfbc8016 Mon Sep 17 00:00:00 2001
+From: Playport fork <local@example.invalid>
+Date: Mon, 9 Nov 2026 14:42:50 +0800
+Subject: [PATCH] win32u: refresh scene mode capacity without changing current
+ mode
+
+Class: ios-port
+Evidence: tools/tests/test_display_modes.py; app/tests/display_test.c
+Offered-upstream: no; fork scene geometry bridge
+---
+ build/win32u-unix/pp_display_modes.h | 15 +++++++++++++++
+ build/win32u-unix/sysparams_ios.c    |  7 +++++--
+ 2 files changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/build/win32u-unix/pp_display_modes.h b/build/win32u-unix/pp_display_modes.h
+index aad32db..5fafb4e 100644
+--- a/build/win32u-unix/pp_display_modes.h
++++ b/build/win32u-unix/pp_display_modes.h
+@@ -33,4 +33,19 @@ static unsigned pp_display_modes( struct pp_display_size *sizes, unsigned max, i
+     }
+     return count;
+ }
++/* Folding updates available modes, preserving the current logical mode. */
++static unsigned pp_display_with_current( struct pp_display_size *sizes, unsigned max,
++                                         int sw, int sh, int cw, int ch )
++{
++    unsigned n = pp_display_modes( sizes, max, sw, sh ), i, j;
++    if (cw <= 0 || ch <= 0 || n >= max) return n;
++    for (i = 0; i < n; i++) if (sizes[i].width == cw && sizes[i].height == ch) return n;
++    for (j = n; j > 0; j--)
++    {
++        if (sizes[j-1].width < cw || (sizes[j-1].width == cw && sizes[j-1].height < ch)) break;
++        sizes[j] = sizes[j-1];
++    }
++    sizes[j] = (struct pp_display_size){cw,ch};
++    return n + 1;
++}
+ #endif
+diff --git a/build/win32u-unix/sysparams_ios.c b/build/win32u-unix/sysparams_ios.c
+index eebb886..704f069 100644
+--- a/build/win32u-unix/sysparams_ios.c
++++ b/build/win32u-unix/sysparams_ios.c
+@@ -4076,13 +4076,16 @@ static const UINT ios_virtual_depths[] = {32, 16, 8};
+  * sizes of Wine's mode emulation that fit in the native size, and the native
+  * size. Returns how many were written to sizes (at most max). */
+ #include "pp_display_modes.h"
++extern int host_game_display_capacity_get(int *, int *) __attribute__((weak));
+ static UINT ios_virtual_sizes( SIZE *sizes, UINT max )
+ {
+     struct pp_display_size list[32];
+     unsigned count, i;
+-    int sw, sh;
++    int sw, sh, current_w, current_h;
+     ios_screen_size( &sw, &sh );
+-    count = pp_display_modes( list, max < 32 ? max : 32, sw, sh );
++    ios_current_size( &current_w, &current_h );
++    if (host_game_display_capacity_get) host_game_display_capacity_get( &sw, &sh );
++    count = pp_display_with_current( list, max < 32 ? max : 32, sw, sh, current_w, current_h );
+     for (i = 0; i < count; i++) { sizes[i].cx = list[i].width; sizes[i].cy = list[i].height; }
+     return count;
+ }
+-- 
+2.56.0
+

@@ -14,6 +14,7 @@ import Foundation
 import SteamClientKit
 
 public struct LaunchSettings: Codable, Equatable, Sendable {
+    public var compatibility = GameCompatibility()
     /// A screen spec (LaunchPlan.validScreen): the resolution, `native` or rows (`720`), in the
     /// aspect ratio's shape; an old `WxH` or `4:3` is that size whatever the aspect ratio; nil inherits.
     public var screen: String?
@@ -79,8 +80,9 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
                 cloudSync: Bool? = nil, ordering: MemoryOrdering = MemoryOrdering(), maxInst: Int? = nil,
                 x87Reduced: Bool? = nil, diskCache: Bool? = nil, runtime: String = "", graphicsOptions: String = "",
                 windowsServices: Bool? = nil, jitPoolMB: Int? = nil, khronosVulkanLoader: Bool? = nil,
-                endLauncherAfterSignIn: Bool? = nil) {
+                endLauncherAfterSignIn: Bool? = nil, compatibility: GameCompatibility = GameCompatibility()) {
         self.screen = screen
+        self.compatibility = compatibility
         self.aspect = aspect
         self.frameLimit = frameLimit
         self.graphics = graphics
@@ -101,6 +103,7 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        compatibility = try c.decodeIfPresent(GameCompatibility.self, forKey: .compatibility) ?? GameCompatibility()
         screen = try c.decodeIfPresent(String.self, forKey: .screen)
         aspect = try c.decodeIfPresent(String.self, forKey: .aspect)
         frameLimit = try c.decodeIfPresent(Int.self, forKey: .frameLimit)
@@ -124,7 +127,7 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
 
     /// Whether a person set nothing; endLauncherAfterSignIn, which no person sets, does not count.
     public var isEmpty: Bool {
-        screen == nil && aspect == nil && frameLimit == nil && graphics == nil
+        compatibility.isEmpty && screen == nil && aspect == nil && frameLimit == nil && graphics == nil
             && arguments.trimmingCharacters(in: .whitespaces).isEmpty && steamAPI == nil && cloudSync == nil
             && ordering.isEmpty && maxInst == nil && x87Reduced == nil && diskCache == nil
             && runtime.trimmingCharacters(in: .whitespaces).isEmpty
@@ -249,6 +252,7 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
 
     /// What one launch uses.
     public struct Effective: Equatable, Sendable {
+        public var compatibility = GameCompatibility()
         /// The resolution spec; nil for the panel's native pixels.
         public var screen: String?
         /// The screen's shape.
@@ -315,7 +319,7 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
         /// The title's madeira.cfg keys (its cohort entry's) with these over them, all over
         /// every game's runtime keys (LaunchSettings.everyGameKeys, decision 0153).
         public func config(over base: [String: String]) -> [String: String] {
-            LaunchSettings.everyGameKeys.merging(base) { _, title in title }.merging(runtime) { _, own in own }
+            compatibility.applying(to: LaunchSettings.everyGameKeys.merging(base) { _, title in title }.merging(runtime) { _, own in own })
         }
     }
 
@@ -341,7 +345,7 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
                                        imported: importsDirect3D12)
         let graphics = game?.graphics ?? global.graphics ?? (dx12 || i386 ? .vulkan : .default)
         let aspect = [game?.aspect, global.aspect].lazy.compactMap { $0.flatMap(ScreenAspect.init(rawValue:)) }.first ?? .phone
-        return Effective(screen: screen, aspect: aspect, frameLimit: limit, graphics: graphics,
+        var effective = Effective(screen: screen, aspect: aspect, frameLimit: limit, graphics: graphics,
                          arguments: splitArguments(game?.arguments ?? ""), steamAPI: game?.steamAPI ?? .emulated,
                          ordering: game?.ordering ?? MemoryOrdering(),
                          maxInst: game?.maxInst.flatMap { FEXProfile.validBlockSize($0) ? $0 : nil },
@@ -351,6 +355,8 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
                          windowsServices: game?.windowsServices ?? false, jitPoolMB: game?.jitPoolMB,
                          khronosVulkanLoader: game?.khronosVulkanLoader ?? false,
                          endLauncherAfterSignIn: game?.endLauncherAfterSignIn ?? false)
+        effective.compatibility = (game?.compatibility ?? GameCompatibility()).over(global.compatibility)
+        return effective
     }
 
     /// The resolutions the pickers offer, the same in every aspect ratio, as screen specs;

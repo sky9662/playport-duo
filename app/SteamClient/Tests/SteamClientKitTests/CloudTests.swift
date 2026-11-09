@@ -169,6 +169,35 @@ final class CloudServiceTests: XCTestCase {
 
     func text(_ url: URL) -> String? { (try? Data(contentsOf: url)).map { String(decoding: $0, as: UTF8.self) } }
 
+    func testNineteenFailedDownloadsRemainRetryableWithoutUploadingOrLosingLocalFiles() async throws {
+        let b = FakeBackend()
+        let files = Dictionary(uniqueKeysWithValues: (1...19).map {
+            ("%WinAppDataRoaming%Turing Complete/schematics/test\($0).data", Array("cloud save \($0)".utf8))
+        })
+        await b.set(cloud: files)
+        await b.set(cloudDownloadFailure: .unsupported("download refused for test"))
+        let s = try await service(b)
+        let unrelated = roots.user.appendingPathComponent("AppData/Roaming/Turing Complete/local-only.txt")
+        try FileManager.default.createDirectory(at: unrelated.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("keep local progress".utf8).write(to: unrelated)
+        let first = try await s.syncCloud(appID: 367520, roots: roots, backups: backups)
+        XCTAssertEqual(first.failed.count, 19)
+        XCTAssertTrue(first.downloaded.isEmpty)
+        XCTAssertTrue(first.uploaded.isEmpty)
+        XCTAssertEqual(text(unrelated), "keep local progress")
+        await b.set(cloudDownloadFailure: nil)
+        let retry = try await s.syncCloud(appID: 367520, roots: roots, backups: backups)
+        XCTAssertEqual(retry.downloaded.count, 19)
+        XCTAssertTrue(retry.failed.isEmpty)
+        XCTAssertTrue(retry.uploaded.isEmpty)
+        XCTAssertEqual(text(unrelated), "keep local progress")
+        for (name, body) in files {
+            XCTAssertEqual(try Data(contentsOf: roots.file(name)!), Data(body))
+            let remote = await b.cloudFile(name)
+            XCTAssertEqual(remote, body)
+        }
+    }
+
     func testAFreshPhoneGetsSteamsSaveAndThenSendsItsPlays() async throws {
         let b = FakeBackend()
         await b.set(cloud: [saveName: Array("from the PC".utf8)])

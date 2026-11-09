@@ -49,7 +49,10 @@ while [ "\$n" -gt 0 ]; do
     *) set -- "\$@" "\$a" ;;
     esac
 done
-exec "$ld64" -oso_prefix "$repo/" "\$@"
+# Keep the original invocation as private build evidence. Some cross-build
+# drivers supply the deployment target as the SDK version as well.
+printf '%s\\n' "\$@" > "$out/latest-link-args.txt"
+exec python3 "$repo/build/ld64/sdk_link.py" "$ld64" -oso_prefix "$repo/" "\$@"
 EOF
 chmod +x "$out/ld"
 printf '{ "schemaVersion": "1.0", "rootPath": ".", "linker": { "path": "ld" } }\n' > "$out/toolset.json"
@@ -60,5 +63,6 @@ unset SWIFTPM_CUSTOM_BIN_DIR
 swift_clang=$(swiftc -print-target-info | python3 -c 'import json,sys; print(json.load(sys.stdin)["paths"]["runtimeResourcePath"] + "/clang")')
 [ -d "$swift_clang/include" ] || { echo "swift-build: Swift compiler intrinsic headers not found" >&2; exit 1; }
 exec swift build "$@" --toolset "$out/toolset.json" \
+    -Xlinker -v \
     -Xswiftc -file-prefix-map -Xswiftc "$repo=." -Xcc "-ffile-prefix-map=$repo=." \
     -Xswiftc -Xcc -Xswiftc -resource-dir -Xswiftc -Xcc -Xswiftc "$swift_clang"

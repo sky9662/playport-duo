@@ -51,6 +51,28 @@ public struct ControlInsets: Equatable, Sendable {
 
     public static let zero = ControlInsets()
 
+    /// Keep the largest rectangular control area beyond each system occlusion.
+    /// Existing asymmetric safe insets are retained; the game image is unaffected.
+    public func avoiding(_ regions: [TouchRect], width: Double, height: Double) -> ControlInsets {
+        guard width > 0, height > 0 else { return self }
+        var result = self
+        for r in regions {
+            let area = result.area(width: width, height: height)
+            guard r.x.isFinite, r.y.isFinite, r.width > 0, r.height > 0,
+                  r.x < area.maxX, r.maxX > area.x, r.y < area.maxY, r.maxY > area.y else { continue }
+            var candidates = Array(repeating: result, count: 4)
+            candidates[0].top = max(result.top, min(height, r.maxY))
+            candidates[1].left = max(result.left, min(width, r.maxX))
+            candidates[2].bottom = max(result.bottom, min(height, height - r.y))
+            candidates[3].right = max(result.right, min(width, width - r.x))
+            result = candidates.max { a, b in
+                let aa = a.area(width: width, height: height), bb = b.area(width: width, height: height)
+                return aa.width * aa.height < bb.width * bb.height
+            } ?? result
+        }
+        return result
+    }
+
     /// The safe area of a view of width × height.
     public func area(width: Double, height: Double) -> TouchRect {
         TouchRect(x: left, y: top, width: max(0, width - left - right), height: max(0, height - top - bottom))

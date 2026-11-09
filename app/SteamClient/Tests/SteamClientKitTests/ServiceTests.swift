@@ -161,6 +161,8 @@ actor FakeBackend: SteamBackend {
     /// Steam Cloud: files by full name, and a change number that moves on every upload.
     var cloud: [String: (data: [UInt8], time: UInt64)] = [:]
     var cloudChange: UInt64 = 1
+    var cloudDownloadFailure: SteamError?
+    func set(cloudDownloadFailure error: SteamError?) { cloudDownloadFailure = error }
     func cloudFile(_ name: String) -> [UInt8]? { cloud[name]?.data }
     func set(cloud c: [String: [UInt8]]) { cloud = c.mapValues { ($0, 1_700_000_000) }; cloudChange += 1 }
     func cloudChangelist(appID: UInt32) async throws -> CCloudGetAppFileChangelistResponse {
@@ -176,6 +178,7 @@ actor FakeBackend: SteamBackend {
     }
     func cloudDownload(appID: UInt32, name: String) async throws -> [UInt8] {
         calls.append("download \(name)")
+        if let cloudDownloadFailure { throw cloudDownloadFailure }
         guard let f = cloud[name] else { throw SteamError.notFound(name) }
         return f.data
     }

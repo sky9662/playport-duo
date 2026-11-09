@@ -374,6 +374,10 @@ ld64 from cctools-port, apple-libtapi (the slow part) and apple-libdispatch
 at pinned commits. The libtapi pin includes arm64e.x1 TextAPI support for Xcode 27 SDKs. Build it with `-D_GLIBCXX_NO_ASSERTIONS` (GCC 15's assertions abort
 in ld64's Objective-C pass). `build/ld64/swift-build` is the SwiftPM toolset
 xtool runs: the per-target `-r` steps go to `ld64.lld`, every final link to ld64.
+The final iOS link reads its SDK version from the actual `-syslibroot`'s
+`SDKSettings.json`, preserving the deployment target. This avoids a cross-build
+driver recording the minimum OS as the SDK version. Missing SDK metadata is an
+error; no SDK directory or finished Mach-O is renamed or patched to claim a version.
 
 ## Signing
 

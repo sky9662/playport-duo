@@ -103,6 +103,8 @@ C_TESTS = [
     ("host log", ["app/tests/host_log_test.c", "app/Sources/HostIO/host_log.c"], ["-D_DEFAULT_SOURCE"]),
     ("keys", ["app/tests/keys_test.c", "app/Sources/HostIO/hio_keys.c"], []),
     ("focus", ["app/tests/focus_test.c", "app/Sources/HostIO/hio_focus.c"], []),
+    ("display capacity", ["app/tests/display_test.c", "app/Sources/HostIO/hio_display.c"], []),
+    ("cursor geometry", ["app/tests/cursor_test.c"], ["-lm"]),
     ("log cap", ["app/tests/log_cap_test.c", "app/Sources/WineHost/log_cap.c"], ["-D_DEFAULT_SOURCE"]),
     ("title path", ["app/tests/title_path_test.c", "app/Sources/WineHost/title_path.c"], ["-D_DEFAULT_SOURCE"]),
     ("dotnet fake DLLs", ["app/tests/dotnet_fakedlls_test.c", "app/Sources/WineHost/dotnet_fakedlls.c"], ["-D_DEFAULT_SOURCE"]),

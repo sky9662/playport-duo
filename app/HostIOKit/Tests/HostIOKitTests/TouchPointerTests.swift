@@ -11,6 +11,27 @@ final class TouchPointerTests: XCTestCase {
     let fire = TouchTarget(id: "fire", kind: .button(.mouse(.left), .hold), frame: TouchRect(x: 700, y: 300, width: 60, height: 60))
     let look = TouchTarget(id: "look", kind: .look, frame: TouchRect(x: 0, y: 0, width: 800, height: 400))
 
+    func testLowTrackpadSensitivityKeepsFractionsAndAbsolutePlacement() {
+        var t = TouchControls(targets: pointerTargets)
+        t.trackpad = true
+        t.trackpadScale = 0.2
+        XCTAssertTrue(t.began(1, at: p(400, 200), time: 0))
+        for i in 1...4 {
+            t.moved(1, at: p(400 + Double(i), 200), time: Double(i) / 100)
+            XCTAssertEqual(t.takeOutput().events, [])
+        }
+        t.moved(1, at: p(405, 200), time: 0.05)
+        XCTAssertEqual(t.takeOutput().events, [.move(dx: 1, dy: 0)])
+        t.releaseAll()
+        t.trackpad = false
+        XCTAssertTrue(t.began(2, at: p(400, 200), time: 1))
+        let placed = t.takeOutput().events
+        t.releaseAll()
+        t.trackpadScale = 8
+        XCTAssertTrue(t.began(3, at: p(400, 200), time: 2))
+        XCTAssertEqual(t.takeOutput().events, placed)
+    }
+
     func testDraggingTheLookAreaMovesTheMouse() {
         var t = TouchControls(targets: [look, fire])
         t.lookScale = 3

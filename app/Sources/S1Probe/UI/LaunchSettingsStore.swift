@@ -27,6 +27,12 @@ final class LaunchSettingsStore: ObservableObject {
 
     func settings(for id: String) -> LaunchSettings { games[id] ?? LaunchSettings() }
 
+    func compatibility(for id: String?) -> GameCompatibility {
+        let own = id.map { settings(for: $0).compatibility } ?? GameCompatibility()
+        let profile = id.flatMap { Self.compat.entry(for: $0)?.settings.compatibility } ?? GameCompatibility()
+        return own.over(global.compatibility).over(profile)
+    }
+
     /// A binding to one game's settings; a game left with nothing set is dropped.
     func binding(for id: String) -> Binding<LaunchSettings> {
         Binding(get: { self.settings(for: id) },
@@ -54,9 +60,11 @@ final class LaunchSettingsStore: ObservableObject {
         var game: LaunchSettings? = games[title.id].map { $0.over(compat) } ?? compat
         if inheritingGraphics { game?.graphics = compat.graphics }
         let arguments = (try? title.launchPlan(cohort: LibraryModel.cohort))?.args ?? []
-        return LaunchSettings.resolve(game: game, global: global,
-                                      importsDirect3D12: title.detectsDirect3D12, i386: title.isI386,
-                                      arguments: arguments)
+        var effective = LaunchSettings.resolve(game: game, global: global,
+                                               importsDirect3D12: title.detectsDirect3D12, i386: title.isI386,
+                                               arguments: arguments)
+        effective.compatibility = compatibility(for: title.id)
+        return effective
     }
 
     private func save<T: Encodable>(_ value: T, _ key: String) {
@@ -71,7 +79,7 @@ final class LaunchSettingsStore: ObservableObject {
 /// How the pickers name a screen spec and a limit on this phone.
 enum LaunchSettingsText {
     /// The resolutions this panel can show in a shape, largest first.
-    static func screens(_ aspect: ScreenAspect = .phone) -> [String] {
+    @MainActor static func screens(_ aspect: ScreenAspect = .phone) -> [String] {
         LaunchSettings.screenPresets.filter { size($0, aspect) != nil }
     }
 
@@ -87,10 +95,10 @@ enum LaunchSettingsText {
         }
     }
 
-    static var frameLimits: [Int] { LaunchSettings.frameLimits(maxRate: UIScreen.main.maximumFramesPerSecond) }
+    @MainActor static var frameLimits: [Int] { LaunchSettings.frameLimits(maxRate: SceneDisplay.maximumRate) }
 
     /// `pixels` adds the size the guest gets on this phone.
-    static func screen(_ spec: String?, pixels: Bool = true, aspect: ScreenAspect = .phone) -> String {
+    @MainActor static func screen(_ spec: String?, pixels: Bool = true, aspect: ScreenAspect = .phone) -> String {
         guard let spec else { return "Native" }
         let px = pixels ? size(spec, aspect).map { " (\($0.0)×\($0.1))" } ?? "" : ""
         switch spec.lowercased() {
@@ -103,7 +111,7 @@ enum LaunchSettingsText {
     static func frameLimit(_ fps: Int) -> String { fps > 0 ? "\(fps) fps" : "Off" }
 
     /// The size the guest gets on this phone for a screen spec (`1600×900`).
-    static func pixels(_ spec: String, _ aspect: ScreenAspect = .phone) -> String? { size(spec, aspect).map { "\($0.0)×\($0.1)" } }
+    @MainActor static func pixels(_ spec: String, _ aspect: ScreenAspect = .phone) -> String? { size(spec, aspect).map { "\($0.0)×\($0.1)" } }
 
     /// A picker's note: when a change applies.
     static let nextStart = "Takes effect the next time the game starts."
@@ -170,8 +178,8 @@ enum LaunchSettingsText {
         + "and can differ from Windows where a game relies on the extra digits. Default is the game's profile. "
         + "Changes apply from the game's next launch."
 
-    private static func size(_ spec: String, _ aspect: ScreenAspect = .phone) -> (Int, Int)? {
-        let px = UIScreen.main.nativeBounds.size
+    @MainActor private static func size(_ spec: String, _ aspect: ScreenAspect = .phone) -> (Int, Int)? {
+        let px = SceneDisplay.pixelSize
         return Display.guestSize(panelLong: Int(px.width), panelShort: Int(px.height), spec: aspect.spec(level: spec))
     }
 }

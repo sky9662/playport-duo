@@ -1,0 +1,55 @@
+From 6a000390ad809786c49b1a79a6b68a34a464273e Mon Sep 17 00:00:00 2001
+From: Local cursor investigation <local@example.invalid>
+Date: Wed, 4 Nov 2026 10:05:49 +0800
+Subject: [PATCH] Winios: forward game cursor image and visibility
+
+Connect the game path to the host cursor renderer without enabling the desktop compositor.
+
+Class: host-app
+Evidence: app/tests/cursor_test.c; host bridge checks; iOS compile and phone gate not run
+Offered-upstream: no; local uncompiled candidate
+---
+ app/Madeira/Winios/Winios.m | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/app/Madeira/Winios/Winios.m b/app/Madeira/Winios/Winios.m
+index 924d1f2..32ada97 100644
+--- a/app/Madeira/Winios/Winios.m
++++ b/app/Madeira/Winios/Winios.m
+@@ -1955,6 +1955,11 @@ int winios_surface_present(HWND hwnd, int dx, int dy, int dw, int dh,
+ 
+ static CALayer *g_cursor_layer;
+ 
++/* The host's transparent game cursor layer; desktop compositor unchanged. */
++extern void host_game_cursor_image(int, int, int, int, const void *) __attribute__((weak));
++extern void host_game_cursor_show(int) __attribute__((weak));
++
++
+ static UIImage *winios_cursor_image(void) {
+     static UIImage *img;
+     static dispatch_once_t once;
+@@ -2031,6 +2036,10 @@ void winios_cursor_move(int x, int y) {
+  * BGRA image + hotspot whenever the wine cursor changes (arrow → I-beam
+  * → resize arrows → app cursors). Copy before returning. */
+ void winios_cursor_set(unsigned int cur_id, int w, int h, int hot_x, int hot_y, const void *bgra) {
++    if (!winios_desktop()) {
++        if (host_game_cursor_image) host_game_cursor_image(w, h, hot_x, hot_y, bgra);
++        return;
++    }
+     if (w <= 0 || h <= 0 || !bgra) return;
+     NSData *data = [NSData dataWithBytes:bgra length:(size_t)w * h * 4];
+     dispatch_async(dispatch_get_main_queue(), ^{
+@@ -2057,6 +2066,10 @@ void winios_cursor_set(unsigned int cur_id, int w, int h, int hot_x, int hot_y,
+ }
+ 
+ void winios_cursor_show(int show) {
++    if (!winios_desktop()) {
++        if (host_game_cursor_show) host_game_cursor_show(show);
++        return;
++    }
+     dispatch_async(dispatch_get_main_queue(), ^{
+         if (g_cursor_layer) g_cursor_layer.hidden = !show;
+     });
+-- 
+2.53.0.windows.3
+

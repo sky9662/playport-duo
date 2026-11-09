@@ -143,7 +143,7 @@ extension LaunchSettings {
                               windowsServices: windowsServices ?? base.windowsServices,
                               jitPoolMB: jitPoolMB ?? base.jitPoolMB,
                               khronosVulkanLoader: khronosVulkanLoader ?? base.khronosVulkanLoader,
-                              endLauncherAfterSignIn: base.endLauncherAfterSignIn)
+                              endLauncherAfterSignIn: base.endLauncherAfterSignIn, compatibility: compatibility.over(base.compatibility))
     }
 
     /// `key=value` items as typed (Runtime keys, Graphics options) over the default's: the

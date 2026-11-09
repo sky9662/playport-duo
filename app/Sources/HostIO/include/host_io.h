@@ -15,6 +15,8 @@
 #include <stdint.h>
 
 #include "hio_pads.h"
+#include "hio_cursor.h"
+#include "hio_display.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -27,7 +27,7 @@ enum MemoryNote {
     static let footer = "The most memory iOS lets Playport use, for a game and Playport's own JIT memory together, "
         + "which is sized from it. "
         + "iOS closes a game that goes past it, so Playport does not start a game known to need more, and warns "
-        + "when one may. It rises once Game Mode turns on. The Increased Memory Limit entitlement raises it; a copy "
+        + "when one may. It can change with Game Mode and memory pressure; it is an estimate, not a guarantee. The Increased Memory Limit entitlement raises it; a copy "
         + "signed without it gets far less."
 
     static let notEntitled = "This copy of Playport was signed without the Increased Memory Limit entitlement. "
@@ -62,7 +62,7 @@ enum MemoryNote {
     private static var advice: String {
         switch MemoryLimit.entitled {
         case false?: notEntitled
-        case true?: "This phone cannot give Playport more."
+        case true?: "This copy already has the entitlement; iOS controls its current memory budget."
         case nil: "A copy of Playport signed with the Increased Memory Limit entitlement gets more."
         }
     }

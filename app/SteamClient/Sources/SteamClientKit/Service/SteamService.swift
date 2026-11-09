@@ -892,6 +892,9 @@ public actor SteamService {
                                      conflicts: conflicts, at: at))
         log.info("cloud", "app \(appID): \(remote.count) on Steam, \(local.count) on the phone; \(downloaded.count) down, "
                  + "\(uploaded.count) up, \(conflicts.count) conflict(s)" + (failed.isEmpty ? "" : ", \(failed.count) failed"))
+        // Preserve the actual failure category in the private log. A count alone cannot
+        // distinguish an unsupported location, rejected download, or corrupt body.
+        for reason in Set(failed.values).sorted() { log.warn("cloud", "app \(appID): file sync failed: \(reason)") }
         return CloudSync(downloaded: downloaded, uploaded: uploaded, conflicts: conflicts, failed: failed, at: at)
     }
 

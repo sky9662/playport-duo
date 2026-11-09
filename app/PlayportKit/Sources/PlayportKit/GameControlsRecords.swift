@@ -12,6 +12,8 @@ public struct GameControlsRecords: Equatable, Sendable {
     public private(set) var games: [String: GameControls] = [:]
     /// The records it cannot read, by catalogue id: their JSON (keys sorted), kept for `json()`.
     public private(set) var unreadable: [String: Data] = [:]
+    /// Fields written by a newer build, preserved when editing known controls.
+    private var extraFields: [String: Data] = [:]
 
     public init() {}
 
@@ -26,6 +28,9 @@ public struct GameControlsRecords: Equatable, Sendable {
             else { return nil }
             if let c = try? JSONDecoder().decode(GameControls.self, from: raw) {
                 games[id] = c
+                let known = Set(GameControls.CodingKeys.allCases.map(\.rawValue))
+                let extra = (value as? [String: Any] ?? [:]).filter { !known.contains($0.key) }
+                if !extra.isEmpty { extraFields[id] = try? JSONSerialization.data(withJSONObject: extra, options: [.sortedKeys]) }
             } else {
                 unreadable[id] = raw
             }
@@ -49,8 +54,14 @@ public struct GameControlsRecords: Equatable, Sendable {
         for (id, raw) in unreadable {
             object[id] = try JSONSerialization.jsonObject(with: raw, options: [.fragmentsAllowed])
         }
+        for (id, raw) in extraFields {
+            object[id] = try JSONSerialization.jsonObject(with: raw)
+        }
         for (id, c) in games {
-            object[id] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(c), options: [.fragmentsAllowed])
+            var fields = object[id] as? [String: Any] ?? [:]
+            let known = try JSONSerialization.jsonObject(with: JSONEncoder().encode(c)) as? [String: Any] ?? [:]
+            fields.merge(known) { _, current in current }
+            object[id] = fields
         }
         return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     }

@@ -92,6 +92,7 @@ final class HostIO {
     private var controllerMap: ControllerMap?
     /// Its look speed (updateControllerMap).
     private var lookSpeed = LookSpeed.defaultValue
+    private var mouseSensitivity = 1.0
     /// The map last logged for each slot's pad.
     private var loggedMaps: [Int: String] = [:]
     private var subscriptions: Set<AnyCancellable> = []
@@ -110,6 +111,8 @@ final class HostIO {
     private var windowsHoldPads = false
     /// The in-game menu is up: keys, touches and the mouse do not reach the guest.
     private(set) var menuUp = false
+    /// The cursor overlay follows the same input hold as the guest.
+    var cursorAllowed: Bool { lifecycle.active && !lifecycle.background && !menuUp }
     /// What the guest's pads get: slot 0 merged with the on-screen controls
     /// (HostIOKit.InputMixer), then held while the menu is up (HostIOKit.GuestPadGate),
     /// from the main thread and the scripted pad's queue; host_pad_set is called
@@ -378,7 +381,8 @@ final class HostIO {
         input.mouseMovedHandler = { _, dx, dy in
             MainActor.assumeIsolated {
                 guard !HostIO.shared.menuUp else { return }
-                let d = HostIO.shared.motion.add(dx: Double(dx), dy: Double(-dy))
+                let d = HostIO.shared.motion.add(dx: Double(dx) * HostIO.shared.mouseSensitivity,
+                                                 dy: Double(-dy) * HostIO.shared.mouseSensitivity)
                 HostIO.trace.update { $0.mouseMoved(dx: Double(dx), dy: Double(-dy), pushed: d) }
                 if let d { winios_pointer(d.0, d.1, Pointer.move, 0) }
             }
@@ -532,6 +536,8 @@ final class HostIO {
     func updateControllerMap() {
         let store = ControlsStore.shared
         let game = TitleLaunch.shared.titleID.map { store.game($0) } ?? GameControls()
+        let sensitivity = game.mouseSensitivity(over: store.defaults)
+        if sensitivity != mouseSensitivity { motion.reset(); mouseSensitivity = sensitivity }
         let map = game.controllerMap(over: store.defaults), speed = game.lookSpeed(over: store.defaults)
         guard map != controllerMap || speed != lookSpeed else { return }
         #if !PLAYPORT_RELEASE
@@ -917,6 +923,9 @@ final class GameSurfaceView: UIView {
     private let gyroChip = GyroChipOverlay()
     /// Point & click's magnifier, over the controls at its own opacity; it takes no touch.
     private let magnifier = MagnifierOverlay()
+    /// Actual Wine cursor, separate from the GDI layer that leaves after first frame.
+    private let guestCursor = GuestCursorOverlay()
+
     /// The suggested layout's toast (UI/LayoutSuggestionToast.swift), over them; it takes touches on its card only.
     private let suggestion = LayoutSuggestionToast()
     /// The performance overlay (UI/PerformanceOverlay.swift), over them all; it takes no touch.
@@ -931,6 +940,7 @@ final class GameSurfaceView: UIView {
         layer.contentsGravity = .resizeAspect
         layer.addSublayer(windows)
         addSubview(controls)
+        addSubview(guestCursor)
         addSubview(magnifier)
         addSubview(gyroChip)
         addSubview(suggestion)
@@ -962,14 +972,19 @@ final class GameSurfaceView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        if let screen = window?.windowScene?.screen, contentScaleFactor != screen.nativeScale {
+            contentScaleFactor = screen.nativeScale
+        }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        TitleScreen.updateCapacity(view: self)
         windows.frame = bounds
         windows.setNeedsLayout()
         CATransaction.commit()
         controls.frame = bounds
         gyroChip.frame = bounds
         magnifier.frame = bounds
+        guestCursor.frame = bounds
         suggestion.frame = bounds
         performance.frame = bounds
     }
@@ -981,7 +996,7 @@ final class GameSurfaceView: UIView {
         // the screen's pixel scale. Vulkan WSI measures bounds * contentsScale;
         // leaving it at 1 makes a native-pixel swapchain permanently suboptimal
         // (912x420 points versus 2736x1260 pixels on a 3x screen).
-        contentScaleFactor = window.screen.nativeScale
+        contentScaleFactor = window.windowScene?.screen.nativeScale ?? window.screen.nativeScale
         // Landscape before the runtime starts, so the swap chain is made at the final size.
         window.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
         window.windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape))

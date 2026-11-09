@@ -141,7 +141,7 @@ final class WindowInsets: ObservableObject {
     func read() -> String {
         let window = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows).first { $0.isKeyWindow }
-        let i = window?.safeAreaInsets ?? .zero
+        let i = window?.gameSafeInsets ?? .zero
         let e = EdgeInsets(top: i.top, leading: i.left, bottom: i.bottom, trailing: i.right)
         if e != insets { insets = e }
         return "safe area top=\(Int(i.top)) left=\(Int(i.left)) bottom=\(Int(i.bottom)) right=\(Int(i.right))"
@@ -152,4 +152,18 @@ final class WindowInsets: ObservableObject {
     var leading: CGFloat { insets.leading }
     var trailing: CGFloat { insets.trailing }
     func side(_ margin: CGFloat, _ inset: CGFloat) -> CGFloat { max(margin, inset + 8) }
+}
+
+/// Folding can change bounds and safe regions without a device-orientation notification.
+struct WindowGeometryObserver: UIViewRepresentable {
+    func makeUIView(context: Context) -> GeometryView { GeometryView() }
+    func updateUIView(_ uiView: GeometryView, context: Context) {}
+    final class GeometryView: UIView {
+        override func layoutSubviews() { super.layoutSubviews(); changed() }
+        override func safeAreaInsetsDidChange() { super.safeAreaInsetsDidChange(); changed() }
+        override func didMoveToWindow() { super.didMoveToWindow(); changed() }
+        private func changed() {
+            DispatchQueue.main.async { _ = WindowInsets.shared.read() }
+        }
+    }
 }

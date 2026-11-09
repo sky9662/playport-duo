@@ -60,11 +60,31 @@ struct SettingsView: View {
     @State private var scrollOffset: CGFloat = 0
 
     var body: some View {
-        HStack(alignment: .top, spacing: 22) {
-            sidebar.frame(width: 190)
-            content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        GeometryReader { geometry in
+            if geometry.size.width < 640 {
+                VStack(spacing: 12) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(SettingsSection.shown, id: \.self) { s in
+                                Button(s.title) { navigation.settingsSection = s; SettingsRing.enter() }
+                                    .buttonStyle(.plain)
+                                    .padding(10)
+                                    .background(navigation.settingsSection == s ? PP.raised : PP.surface, in: RoundedRectangle(cornerRadius: 10))
+                                    .padItem(s.navItem, hint: "Open") { navigation.settingsSection = s; SettingsRing.enter() }
+                            }
+                        }
+                    }
+                    content
+                }
+                .padding(.horizontal, 20).padding(.top, 12)
+            } else {
+                HStack(alignment: .top, spacing: 22) {
+                    sidebar.frame(width: 190)
+                    content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                }
+                .padding(.horizontal, 44).padding(.top, 12)
+            }
         }
-        .padding(.horizontal, 44).padding(.top, 12)
         // The height the shell offers, from the top: a sidebar a few points taller must
         // not push the shell's footer off its place.
         .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
@@ -315,6 +335,7 @@ private struct GraphicsSettings: View {
         SettingsSwitchRow(id: "performanceOverlay", title: "Performance overlay",
                           subtitle: "Frame rate, frame time and the phone's temperature over a game",
                           on: $performanceOverlay)
+        GameCompatibilityRows()
         memoryRows
         SettingsNote(text: "From each game's next start. 720p at 60 fps keeps the phone cool enough to hold its "
                      + "frame rate; Native is the screen's full resolution, and Off runs a game as fast as the screen "
@@ -448,6 +469,7 @@ private struct ControlsSettings: View {
                value: store.defaults.controllerMap.mode.title, accessory: .chevron, hint: "Open") {
             AppNavigation.shared.openSettingsControllerMap()
         }
+        PointerSensitivityRows()
         GyroDefaultsRows()
         Color.clear.frame(height: 0).onAppear { router.refreshControllers() }
     }

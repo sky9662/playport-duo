@@ -108,6 +108,7 @@ struct AppShell: View {
             BlackScreenView()
             #endif
         }
+        .background(WindowGeometryObserver().allowsHitTesting(false))
         .padFocusRoot()
         .onReceive(PadRouter.shared.presses) { press($0) }
         // Choosing a pairing file (the checklist's step on iOS 26, Setup check's import), or a

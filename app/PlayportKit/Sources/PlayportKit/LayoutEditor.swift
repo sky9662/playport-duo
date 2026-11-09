@@ -109,24 +109,34 @@ public struct LayoutEditor: Equatable, Sendable {
     public private(set) var preset: OnScreenLayout
     public private(set) var layout: ControlLayout
     public private(set) var selection: String?
+    private var additionalSelection: Set<String> = []
+    public var selectedIDs: Set<String> {
+        guard let selection else { return [] }
+        return additionalSelection.union([selection]).filter { layout.control($0) != nil }
+    }
+    public var selectionFrame: TouchRect? { bounds(of: selectedIDs, in: layout) }
     /// The guides of the drag going on now.
     public private(set) var guides: [SnapGuide] = []
     public private(set) var width: Double, height: Double, insets: ControlInsets
 
     /// The Gamepad preset's options (its d-pad and right stick).
     let dpad: OnScreenDpad, rightStick: OnScreenRightStick
+    let expandedControls: Bool
     /// The game's copies when the editor opened, for `start(from:)`.
     var copies: [OnScreenLayout: ControlLayout]
+    private var explicitCopy = false
 
     struct Snapshot: Equatable, Sendable {
         var preset: OnScreenLayout
         var layout: ControlLayout
+        var explicitCopy: Bool = false
     }
     var undoStack: [Snapshot] = []
     var redoStack: [Snapshot] = []
 
     struct Gesture: Equatable, Sendable {
         var id: String
+        var ids: Set<String>
         var before: Snapshot
         var frame: TouchRect
         var zone: TouchRect?
@@ -137,20 +147,28 @@ public struct LayoutEditor: Equatable, Sendable {
 
     /// Edits `preset` (Off edits Gamepad): the game's copy of it from `copies`, else the preset.
     public init(preset: OnScreenLayout, copies: [OnScreenLayout: ControlLayout] = [:], dpad: OnScreenDpad = .off,
-                rightStick: OnScreenRightStick = .off, width: Double, height: Double, insets: ControlInsets = .zero) {
+                rightStick: OnScreenRightStick = .off, width: Double, height: Double, insets: ControlInsets = .zero,
+                expandedControls: Bool = false) {
         let p = preset == .off ? OnScreenLayout.gamepad : preset
         self.preset = p
         self.copies = copies
         self.dpad = dpad; self.rightStick = rightStick
+        self.expandedControls = expandedControls
         self.width = width; self.height = height; self.insets = insets
-        layout = copies[p] ?? p.layout(dpad: dpad, rightStick: rightStick) ?? .gamepad(dpad: dpad, rightStick: rightStick)
+        let builtIn = p.layout(dpad: dpad, rightStick: rightStick) ?? .gamepad(dpad: dpad, rightStick: rightStick)
+        layout = copies[p] ?? (expandedControls ? builtIn.sideReachLayout() : builtIn)
         opened = Snapshot(preset: p, layout: layout)
     }
 
     /// Edits what a game plays with: its layout (Off: Gamepad) and its copies, with its Gamepad options.
-    public init(game: GameControls?, state: ControlsState, width: Double, height: Double, insets: ControlInsets = .zero) {
-        self.init(preset: state.layout, copies: game?.layouts ?? [:], dpad: state.dpad, rightStick: state.rightStick,
-                  width: width, height: height, insets: insets)
+    public init(game: GameControls?, state: ControlsState, width: Double, height: Double, insets: ControlInsets = .zero,
+                expandedControls: Bool = false) {
+        var copies = game?.layouts ?? [:]
+        if expandedControls {
+            copies = copies.mapValues { $0.sideReachLayout() }.merging(game?.expandedLayouts ?? [:]) { _, explicit in explicit }
+        }
+        self.init(preset: state.layout, copies: copies, dpad: state.dpad, rightStick: state.rightStick,
+                  width: width, height: height, insets: insets, expandedControls: expandedControls)
     }
 
     // MARK: what it shows
@@ -250,7 +268,25 @@ public struct LayoutEditor: Equatable, Sendable {
     // MARK: editing
 
     public mutating func select(_ id: String?) {
+        endGesture()
+        additionalSelection = []
         selection = id.flatMap { layout.control($0) == nil ? nil : $0 }
+    }
+
+    public mutating func toggleSelection(_ id: String) {
+        guard let control = layout.control(id), !control.isSurface else { return }
+        endGesture()
+        var ids = selectedIDs.filter { layout.control($0)?.isSurface == false }
+        if ids.contains(id) { ids.remove(id) } else { ids.insert(id) }
+        selection = ids.contains(id) ? id : ids.sorted().first
+        additionalSelection = ids.subtracting(selection.map { [$0] } ?? [])
+    }
+
+    public mutating func selectAll() {
+        endGesture()
+        let ids = layout.controls.filter { !$0.isSurface }.map(\.id)
+        selection = ids.first
+        additionalSelection = Set(ids.dropFirst())
     }
 
     /// The view's size changed (a rotation): the controls stay where their anchors put them.
@@ -263,6 +299,14 @@ public struct LayoutEditor: Equatable, Sendable {
     /// safe area, its guides shown. `endGesture()` ends it as one undo step.
     public mutating func drag(_ id: String, dx: Double, dy: Double) {
         guard let g = begin(id), let i = index(id) else { return }
+        if g.ids.count > 1 {
+            guard dx.isFinite, dy.isFinite, let group = bounds(of: g.ids, in: g.before.layout) else { return }
+            let a = area
+            let x = min(max((dx / Self.grid).rounded() * Self.grid, a.x - group.x), a.x + a.width - group.x - group.width)
+            let y = min(max((dy / Self.grid).rounded() * Self.grid, a.y - group.y), a.y + a.height - group.y - group.height)
+            transformGroup(g, scale: 1, dx: x, dy: y)
+            return
+        }
         var f = g.frame
         f.x += dx; f.y += dy
         let others = layout.controls.filter { $0.id != id && !$0.isSurface }.map { $0.frame(width: width, height: height, insets: insets) }
@@ -292,6 +336,15 @@ public struct LayoutEditor: Equatable, Sendable {
     /// size snapped to the grid, at least `minimumSide`, at most the safe area.
     public mutating func pinch(_ id: String, scale: Double) {
         guard let g = begin(id), let i = index(id) else { return }
+        guard scale.isFinite, scale > 0 else { return }
+        if g.ids.count > 1 {
+            guard let group = bounds(of: g.ids, in: g.before.layout), group.width > 0, group.height > 0 else { return }
+            let frames = g.ids.compactMap { g.before.layout.control($0)?.frame(width: width, height: height, insets: insets) }
+            let minimum = frames.map { Self.minimumSide / min($0.width, $0.height) }.max() ?? 1
+            let maximum = min(area.width / group.width, area.height / group.height)
+            transformGroup(g, scale: min(max(scale, minimum), maximum), dx: 0, dy: 0)
+            return
+        }
         let a = area
         func side(_ v: Double, _ most: Double) -> Double {
             min(max(Self.minimumSide, (v * scale / Self.grid).rounded() * Self.grid), most)
@@ -313,6 +366,12 @@ public struct LayoutEditor: Equatable, Sendable {
 
     /// The inspector's size: `steps` grid steps more (fewer) each way, about the centre.
     public mutating func resize(_ id: String, by steps: Int) {
+        if selectedIDs.count > 1, selectedIDs.contains(id), let group = selectionFrame, group.width > 0 {
+            endGesture()
+            pinch(id, scale: (group.width + Double(steps) * Self.grid) / group.width)
+            endGesture()
+            return
+        }
         guard let c = layout.control(id), !c.isSurface, let f = frame(of: id) else { return }
         let a = area
         let d = Double(steps) * Self.grid
@@ -365,6 +424,7 @@ public struct LayoutEditor: Equatable, Sendable {
             layout.controls.append(c)
         }
         record(before)
+        additionalSelection = []
         selection = c.id
         return c.id
     }
@@ -387,6 +447,7 @@ public struct LayoutEditor: Equatable, Sendable {
         let before = snapshot
         layout.controls.insert(c, at: index(id)! + 1)
         record(before)
+        additionalSelection = []
         selection = c.id
         return c.id
     }
@@ -424,6 +485,7 @@ public struct LayoutEditor: Equatable, Sendable {
         endGesture()
         let before = snapshot
         layout = presetLayout(preset)
+        explicitCopy = false
         record(before)
         selection = nil
     }
@@ -437,6 +499,19 @@ public struct LayoutEditor: Equatable, Sendable {
         layout = copies[p] ?? presetLayout(p)
         record(before)
         selection = nil
+    }
+
+    /// A value copy: changing this game cannot modify the shared profile.
+    public mutating func apply(_ profile: ControlLayoutProfiles.Profile) {
+        let variant = expandedControls ? profile.inner : profile.outer
+        guard variant.preset != .off else { return }
+        endGesture()
+        let before = snapshot
+        preset = variant.preset
+        layout = variant.layout
+        explicitCopy = true
+        select(nil)
+        record(before)
     }
 
     public mutating func undo() {
@@ -458,18 +533,24 @@ public struct LayoutEditor: Equatable, Sendable {
     public func saved(into game: GameControls?) -> GameControls {
         var g = game ?? GameControls()
         guard changed else { return g }
-        g.layout = preset
-        g.layouts[preset] = isEdited ? layout : nil
+        if expandedControls {
+            g.expandedLayout = preset
+            g.expandedLayouts[preset] = layout
+        } else {
+            g.layout = preset
+            g.layouts[preset] = isEdited || explicitCopy ? layout : nil
+        }
         return g
     }
 
     // MARK: inside
 
     func presetLayout(_ p: OnScreenLayout) -> ControlLayout {
-        p.layout(dpad: dpad, rightStick: rightStick) ?? .gamepad(dpad: dpad, rightStick: rightStick)
+        let value = p.layout(dpad: dpad, rightStick: rightStick) ?? .gamepad(dpad: dpad, rightStick: rightStick)
+        return expandedControls ? value.sideReachLayout() : value
     }
 
-    var snapshot: Snapshot { Snapshot(preset: preset, layout: layout) }
+    var snapshot: Snapshot { Snapshot(preset: preset, layout: layout, explicitCopy: explicitCopy) }
 
     func index(_ id: String) -> Int? { layout.controls.firstIndex { $0.id == id } }
 
@@ -478,8 +559,11 @@ public struct LayoutEditor: Equatable, Sendable {
         if let g = gesture, g.id == id { return g }
         endGesture()
         guard let c = layout.control(id), !c.isSurface, let f = frame(of: id) else { return nil }
-        let g = Gesture(id: id, before: snapshot, frame: f, zone: zone(of: id))
+        if !selectedIDs.contains(id) { additionalSelection = [] }
+        let ids = selectedIDs.contains(id) ? selectedIDs : [id]
+        let g = Gesture(id: id, ids: ids, before: snapshot, frame: f, zone: zone(of: id))
         gesture = g
+        additionalSelection = ids.subtracting([id])
         selection = id
         return g
     }
@@ -503,7 +587,40 @@ public struct LayoutEditor: Equatable, Sendable {
     mutating func restore(_ s: Snapshot) {
         preset = s.preset
         layout = s.layout
+        explicitCopy = s.explicitCopy
         if let id = selection, layout.control(id) == nil { selection = nil }
+        additionalSelection = additionalSelection.filter { layout.control($0) != nil }
+    }
+
+    private func bounds(of ids: Set<String>, in value: ControlLayout) -> TouchRect? {
+        let frames = value.controls.filter { ids.contains($0.id) }.map { $0.frame(width: width, height: height, insets: insets) }
+        guard let first = frames.first else { return nil }
+        let x = frames.map(\.x).min() ?? first.x, y = frames.map(\.y).min() ?? first.y
+        let right = frames.map { $0.x + $0.width }.max() ?? first.x
+        let bottom = frames.map { $0.y + $0.height }.max() ?? first.y
+        return TouchRect(x: x, y: y, width: right - x, height: bottom - y)
+    }
+
+    private mutating func transformGroup(_ gesture: Gesture, scale: Double, dx: Double, dy: Double) {
+        guard let group = bounds(of: gesture.ids, in: gesture.before.layout) else { return }
+        let a = area, cx = group.x + group.width / 2, cy = group.y + group.height / 2
+        let target = TouchRect(x: cx - group.width * scale / 2 + dx, y: cy - group.height * scale / 2 + dy,
+                               width: group.width * scale, height: group.height * scale)
+        let kept = target.kept(in: a)
+        let shiftX = dx + kept.x - target.x, shiftY = dy + kept.y - target.y
+        for id in gesture.ids {
+            guard let i = index(id), var c = gesture.before.layout.control(id) else { continue }
+            let f = c.frame(width: width, height: height, insets: insets)
+            let transformed = TouchRect(x: cx + (f.x - cx) * scale + shiftX, y: cy + (f.y - cy) * scale + shiftY,
+                                        width: f.width * scale, height: f.height * scale)
+            if let z = c.floatingZone?.frame(in: a) {
+                let zone = TouchRect(x: cx + (z.x - cx) * scale + shiftX, y: cy + (z.y - cy) * scale + shiftY,
+                                     width: z.width * scale, height: z.height * scale)
+                c.placeZone(at: zone.kept(in: a), in: a)
+            }
+            c.place(at: transformed, in: a)
+            layout.controls[i] = c
+        }
     }
 
     /// The shift that puts the nearest of `lines` on one of `targets` within `snapDistance`

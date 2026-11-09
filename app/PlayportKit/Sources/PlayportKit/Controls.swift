@@ -213,6 +213,10 @@ public struct GameControls: Codable, Equatable, Sendable {
     public var trackpadSensitivity: Double?
     public var mouseSensitivity: Double?
     public var layouts: [OnScreenLayout: ControlLayout]
+    public var expandedLayout: OnScreenLayout? = nil
+    public var expandedLayouts: [OnScreenLayout: ControlLayout] = [:]
+    public var expandedDpad: OnScreenDpad? = nil
+    public var expandedRightStick: OnScreenRightStick? = nil
 
     public init(layout: OnScreenLayout? = nil, opacity: Double? = nil, dpad: OnScreenDpad? = nil,
                 rightStick: OnScreenRightStick? = nil, gyro: GameGyro? = nil, controllerMap: ControllerMap? = nil,
@@ -221,7 +225,7 @@ public struct GameControls: Codable, Equatable, Sendable {
         self.controllerMap = controllerMap; self.lookSpeed = lookSpeed; self.layouts = layouts
     }
 
-    enum CodingKeys: String, CodingKey, CaseIterable { case layout, opacity, dpad, rightStick, gyro, controllerMap, lookSpeed, trackpadSensitivity, mouseSensitivity, layouts }
+    enum CodingKeys: String, CodingKey, CaseIterable { case layout, opacity, dpad, rightStick, gyro, controllerMap, lookSpeed, trackpadSensitivity, mouseSensitivity, layouts, expandedLayout, expandedLayouts, expandedDpad, expandedRightStick }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -234,6 +238,16 @@ public struct GameControls: Codable, Equatable, Sendable {
         lookSpeed = try c.decodeIfPresent(Double.self, forKey: .lookSpeed)
         trackpadSensitivity = try c.decodeIfPresent(Double.self, forKey: .trackpadSensitivity)
         mouseSensitivity = try c.decodeIfPresent(Double.self, forKey: .mouseSensitivity)
+        expandedLayout = try c.decodeIfPresent(OnScreenLayout.self, forKey: .expandedLayout)
+        expandedDpad = try c.decodeIfPresent(OnScreenDpad.self, forKey: .expandedDpad)
+        expandedRightStick = try c.decodeIfPresent(OnScreenRightStick.self, forKey: .expandedRightStick)
+        expandedLayouts = [:]
+        for (name, value) in try c.decodeIfPresent([String: ControlLayout].self, forKey: .expandedLayouts) ?? [:] {
+            guard let preset = OnScreenLayout(rawValue: name), preset != .off else {
+                throw DecodingError.dataCorruptedError(forKey: .expandedLayouts, in: c, debugDescription: "unknown inner display preset")
+            }
+            expandedLayouts[preset] = value
+        }
         layouts = [:]
         for (name, l) in try c.decodeIfPresent([String: ControlLayout].self, forKey: .layouts) ?? [:] {
             guard let preset = OnScreenLayout(rawValue: name), preset != .off else {
@@ -254,6 +268,12 @@ public struct GameControls: Codable, Equatable, Sendable {
         try c.encodeIfPresent(lookSpeed, forKey: .lookSpeed)
         try c.encodeIfPresent(trackpadSensitivity, forKey: .trackpadSensitivity)
         try c.encodeIfPresent(mouseSensitivity, forKey: .mouseSensitivity)
+        try c.encodeIfPresent(expandedLayout, forKey: .expandedLayout)
+        try c.encodeIfPresent(expandedDpad, forKey: .expandedDpad)
+        try c.encodeIfPresent(expandedRightStick, forKey: .expandedRightStick)
+        if !expandedLayouts.isEmpty {
+            try c.encode(Dictionary(uniqueKeysWithValues: expandedLayouts.map { ($0.key.rawValue, $0.value) }), forKey: .expandedLayouts)
+        }
         if !layouts.isEmpty {
             try c.encode(Dictionary(uniqueKeysWithValues: layouts.map { ($0.key.rawValue, $0.value) }), forKey: .layouts)
         }
@@ -262,6 +282,7 @@ public struct GameControls: Codable, Equatable, Sendable {
     public var isEmpty: Bool {
         layout == nil && opacity == nil && dpad == nil && rightStick == nil && (gyro?.isEmpty ?? true) && controllerMap == nil
             && lookSpeed == nil && trackpadSensitivity == nil && mouseSensitivity == nil && layouts.isEmpty
+            && expandedLayout == nil && expandedLayouts.isEmpty && expandedDpad == nil && expandedRightStick == nil
     }
 
     /// The game's controller map, else the default.
@@ -276,6 +297,18 @@ public struct GameControls: Codable, Equatable, Sendable {
 
     public func mouseSensitivity(over defaults: ControlsDefaults) -> Double {
         PointerSensitivity.kept(mouseSensitivity) ?? defaults.mouseSensitivity
+    }
+
+    /// Merge an editor's current display only. Other display drafts and
+    /// game-wide input settings must survive display switches and undo.
+    public mutating func copyDisplayLayout(from other: GameControls, expanded: Bool) {
+        if expanded {
+            expandedLayout = other.expandedLayout
+            expandedLayouts = other.expandedLayouts
+        } else {
+            layout = other.layout
+            layouts = other.layouts
+        }
     }
 
     /// The same, with a gyro that sets nothing dropped (what the store saves).
@@ -316,6 +349,10 @@ public struct ControlsState: Equatable, Sendable {
 
     /// What is drawn: the game's copy of the layout or the preset, or nothing.
     public var drawnLayout: ControlLayout? { visible ? edited ?? layout.layout(dpad: dpad, rightStick: rightStick) : nil }
+    public func presentationLayout(expanded: Bool) -> ControlLayout? {
+        guard let drawnLayout else { return nil }
+        return expanded && edited == nil ? drawnLayout.sideReachLayout() : drawnLayout
+    }
 
     /// The d-pad and right stick options place something: the layout is the Gamepad preset itself, not
     /// the game's copy of it (which has its own) or another layout (which has none).
@@ -324,12 +361,15 @@ public struct ControlsState: Equatable, Sendable {
     /// The game's own layout, else Off under Never, else the game's compatibility default (`compat`,
     /// CompatDefaults.Entry.controls), else Settings' Starting layout, else Gamepad (decision 0074).
     public static func resolve(game: GameControls?, defaults: ControlsDefaults, controllerConnected: Bool,
-                               compat: OnScreenLayout? = nil) -> ControlsState {
-        let layout = game?.layout ?? (defaults.show == .never ? .off : compat ?? defaults.startingLayout ?? .gamepad)
+                               compat: OnScreenLayout? = nil, expanded: Bool = false) -> ControlsState {
+        let own = expanded ? game?.expandedLayout ?? game?.layout : game?.layout
+        let layout = own ?? (defaults.show == .never ? .off : compat ?? defaults.startingLayout ?? .gamepad)
         let shown = layout != .off && (defaults.show == .always || !controllerConnected)
         return ControlsState(layout: layout, visible: shown, opacity: game?.opacity ?? defaults.opacity,
-                             dpad: game?.dpad ?? defaults.dpad, rightStick: game?.rightStick ?? defaults.rightStick,
-                             padConnected: shown || !controllerConnected, edited: game?.layouts[layout])
+                             dpad: (expanded ? game?.expandedDpad ?? game?.dpad : game?.dpad) ?? defaults.dpad,
+                             rightStick: (expanded ? game?.expandedRightStick ?? game?.rightStick : game?.rightStick) ?? defaults.rightStick,
+                             padConnected: shown || !controllerConnected,
+                             edited: expanded ? game?.expandedLayouts[layout] ?? game?.layouts[layout]?.sideReachLayout() : game?.layouts[layout])
     }
 
     /// The in-game menu's Controls row: `Gamepad · 60%`, `Off`, `Gamepad · hidden` while a controller

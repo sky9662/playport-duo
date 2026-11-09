@@ -25,6 +25,7 @@ import SwiftUI
 // MARK: Game options › Controls
 
 struct GameControlsOptionRows: View {
+    @Environment(\.horizontalSizeClass) private var horizontalClass
     let titleID: String
     /// The game's name, the pickers' context.
     let context: String
@@ -33,28 +34,35 @@ struct GameControlsOptionRows: View {
 
     var body: some View {
         let own = store.game(titleID)
-        let inherited = ControlsState.resolve(game: nil, defaults: store.defaults, controllerConnected: false)
+        let expanded = horizontalClass == .regular
+        let inheritance: GameControls = {
+            var value = own
+            value.expandedLayout = nil; value.expandedDpad = nil; value.expandedRightStick = nil
+            return value
+        }()
+        let inherited = ControlsState.resolve(game: expanded ? inheritance : nil, defaults: store.defaults, controllerConnected: false,
+                                               expanded: expanded)
         // The game's compatibility default (decision 0074), where it is the layout the game starts on.
         let entry = LaunchSettingsStore.compat.entry(for: titleID)
         let suggested = ControlsState.resolve(game: nil, defaults: store.defaults, controllerConnected: false,
                                               compat: entry?.controls).layout
         let compat = suggested == inherited.layout ? nil : suggested
-        PadSectionHeader(text: "Controls").id("controls")
+        PadSectionHeader(text: expanded ? "Controls · Inner display" : "Controls · Outer display").id("controls")
         if let entry, compat != nil {
             // What the marker means, as Graphics' row says it for launch settings (GameDetailView).
             PadRow(id: "opt:compatControls", title: "\(OptionValue.compatMarker) Set for this game's compatibility",
                    subtitle: entry.reason + " Your own choice on the row below wins; Y on it comes back to this.",
                    subtitleLines: nil, style: .plain, hint: "Info") {}
         }
-        choiceRow("opt:layout", "On-screen controls", \.layout, all: OnScreenLayout.allCases, inherited: inherited.layout,
-                  compat: compat, name: \.title, detail: "Shown while no controller is connected")
+        choiceRow("opt:layout", "On-screen controls", expanded ? \.expandedLayout : \.layout, all: OnScreenLayout.allCases, inherited: inherited.layout,
+                  compat: compat, name: \.title, detail: expanded ? "Inner display; Default follows the outer layout" : "Outer display; shown while no controller is connected")
         // The Gamepad preset's d-pad and right stick: only while the game plays that preset itself
         // (no copy of its own, not another layout), where they change what is drawn.
-        let plays = ControlsState.resolve(game: own, defaults: store.defaults, controllerConnected: false, compat: entry?.controls)
+        let plays = ControlsState.resolve(game: own, defaults: store.defaults, controllerConnected: false, compat: entry?.controls, expanded: expanded)
         if plays.hasGamepadOptions {
-            choiceRow("opt:dpad", "D-pad", \.dpad, all: OnScreenDpad.allCases, inherited: inherited.dpad, name: \.title,
+            choiceRow("opt:dpad", "D-pad", expanded ? \.expandedDpad : \.dpad, all: OnScreenDpad.allCases, inherited: inherited.dpad, name: \.title,
                       detail: "Above the left stick")
-            choiceRow("opt:rightStick", "Right stick", \.rightStick, all: OnScreenRightStick.allCases,
+            choiceRow("opt:rightStick", "Right stick", expanded ? \.expandedRightStick : \.rightStick, all: OnScreenRightStick.allCases,
                       inherited: inherited.rightStick, name: \.title, detail: "Beside A/B/X/Y")
         }
         let opacity = OptionValue.of(own: own.opacity, inherited: inherited.opacity, name: ControlsOpacity.label)
@@ -67,11 +75,12 @@ struct GameControlsOptionRows: View {
                 selected: own.opacity.map { String(ControlsOpacity.step($0, by: 0)) } ?? "") { id in set { $0.opacity = Double(id) } }
         }
         // The layout editor (UI/LayoutEditorView.swift) over the game's art; the dot and Y for the game's own copies.
+        let layouts = expanded ? own.expandedLayouts : own.layouts
         PadRow(id: LayoutEditorSession.gameRowID, title: "Edit on-screen layout",
-               value: own.layouts.isEmpty ? "Over the game"
-                   : "Your " + OnScreenLayout.allCases.filter { own.layouts[$0] != nil }.map(\.title).joined(separator: ", "),
-               accessory: .chevron, changed: !own.layouts.isEmpty, style: .plain, hint: "Open",
-               reset: own.layouts.isEmpty ? nil : { set { $0.layouts = [:] } }) {
+               value: layouts.isEmpty ? "Over the game"
+                   : "Your " + OnScreenLayout.allCases.filter { layouts[$0] != nil }.map(\.title).joined(separator: ", "),
+               accessory: .chevron, changed: !layouts.isEmpty, style: .plain, hint: "Open",
+               reset: layouts.isEmpty ? nil : { set { if expanded { $0.expandedLayouts = [:] } else { $0.layouts = [:] } } }) {
             LayoutEditorSession.shared.openOverArt(titleID: titleID, title: context)
         }
         // The Controller page (UI/ControllerMapView.swift): the game's controller map and its look speed.

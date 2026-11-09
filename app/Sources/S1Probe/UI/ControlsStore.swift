@@ -26,6 +26,7 @@ final class ControlsStore: ObservableObject {
     /// Settings › Controls › Gyro aim (the `gyro.*` keys).
     @Published private(set) var gyroDefaults = GyroSettings(.standard)
     @Published private var games: GameControlsRecords
+    @Published private(set) var layoutProfiles: ControlLayoutProfiles? = ControlLayoutProfiles()
     /// What is stored under `gamesKey` could not be read at all: a change applies, but is not saved over it.
     private var gamesUnreadable = false
     private var observer: NSObjectProtocol?
@@ -34,6 +35,7 @@ final class ControlsStore: ObservableObject {
         let loaded = Self.loadGames()
         games = loaded ?? GameControlsRecords()
         gamesUnreadable = loaded == nil
+        reloadLayoutProfiles()
         // Settings' rows and the driver's set: write the keys themselves.
         observer = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil,
                                                           queue: .main) { _ in
@@ -48,6 +50,7 @@ final class ControlsStore: ObservableObject {
     }
 
     private func reload() {
+        reloadLayoutProfiles()
         let d = ControlsDefaults(.standard)
         if d != defaults { defaults = d }
         let gd = GyroSettings(.standard)
@@ -59,6 +62,34 @@ final class ControlsStore: ObservableObject {
     }
 
     func game(_ id: String) -> GameControls { games[id] ?? GameControls() }
+
+    private func reloadLayoutProfiles() {
+        if let data = UserDefaults.standard.data(forKey: ControlLayoutProfiles.storageKey) {
+            layoutProfiles = try? JSONDecoder().decode(ControlLayoutProfiles.self, from: data)
+        } else if UserDefaults.standard.object(forKey: ControlLayoutProfiles.storageKey) == nil {
+            layoutProfiles = ControlLayoutProfiles()
+        } else {
+            layoutProfiles = nil
+        }
+    }
+
+    func saveLayoutProfile(_ slot: Int, outer: ControlLayoutProfiles.Variant, inner: ControlLayoutProfiles.Variant) {
+        guard var profiles = layoutProfiles else { return }
+        profiles.save(slot, outer: outer, inner: inner)
+        storeLayoutProfiles(profiles)
+    }
+
+    func renameLayoutProfile(_ slot: Int, to name: String) {
+        guard var profiles = layoutProfiles else { return }
+        profiles.rename(slot, to: name)
+        storeLayoutProfiles(profiles)
+    }
+
+    private func storeLayoutProfiles(_ profiles: ControlLayoutProfiles) {
+        guard let data = try? JSONEncoder().encode(profiles) else { return }
+        layoutProfiles = profiles
+        UserDefaults.standard.set(data, forKey: ControlLayoutProfiles.storageKey)
+    }
 
     /// A game's gyro aim: its own over the defaults.
     func gyro(_ id: String) -> GyroSettings { game(id).gyroSettings(over: gyroDefaults) }

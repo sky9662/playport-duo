@@ -172,11 +172,14 @@ final class InGameMenu: ObservableObject {
         var intoEditor = false
         switch row {
         case .layout:
-            mine.layout = Self.step(now.layout, by: by, wrapping: wrapping)
+            let next = Self.step(now.layout, by: by, wrapping: wrapping)
+            if SceneDisplay.usesSideControls { mine.expandedLayout = next } else { mine.layout = next }
         case .dpad:
-            mine.dpad = Self.step(now.dpad, by: by, wrapping: wrapping)
+            let next = Self.step(now.dpad, by: by, wrapping: wrapping)
+            if SceneDisplay.usesSideControls { mine.expandedDpad = next } else { mine.dpad = next }
         case .rightStick:
-            mine.rightStick = Self.step(now.rightStick, by: by, wrapping: wrapping)
+            let next = Self.step(now.rightStick, by: by, wrapping: wrapping)
+            if SceneDisplay.usesSideControls { mine.expandedRightStick = next } else { mine.rightStick = next }
         case .opacity:
             let next = ControlsOpacity.step(now.opacity, by: by)
             mine.opacity = wrapping && next == now.opacity ? ControlsOpacity.steps[0] : next

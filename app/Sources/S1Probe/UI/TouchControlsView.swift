@@ -202,6 +202,7 @@ final class OnScreenControls: ObservableObject {
         guard s != size || i != insets else { return }
         size = s
         insets = i
+        update()
         Self.log("placed in \(Int(s.width))x\(Int(s.height)), safe area insets top=\(Int(i.top)) left=\(Int(i.left)) "
                  + "bottom=\(Int(i.bottom)) right=\(Int(i.right))")
         place()
@@ -215,8 +216,9 @@ final class OnScreenControls: ObservableObject {
         controls.trackpadScale = 2 * (game?.trackpadSensitivity(over: defaults) ?? defaults.trackpadSensitivity)
         controls.lookScale = 3 * (game?.mouseSensitivity(over: defaults) ?? defaults.mouseSensitivity)
         let compat = launch.titleID.flatMap { LaunchSettingsStore.compat.entry(for: $0)?.controls }
-        let s = ControlsState.resolve(game: game, defaults: defaults, controllerConnected: controllers > 0, compat: compat)
-        let newLayout = s.drawnLayout
+        let s = ControlsState.resolve(game: game, defaults: defaults, controllerConnected: controllers > 0, compat: compat,
+                                      expanded: SceneDisplay.usesSideControls)
+        let newLayout = s.presentationLayout(expanded: SceneDisplay.usesSideControls)
         let drawNow = (newLayout != nil || keyboard) && launch.running && launch.step == .drawing && !launch.quitting
             && !guestHeld && !dialog
         let changed = s != state || drawNow != drawn || newLayout != layout || keyboard != (keyboardLayout != nil)

@@ -57,6 +57,12 @@ final class LayoutEditorSession: ObservableObject {
     @Published private(set) var pad = LayoutEditorPad()
     /// The controls' opacity as the bar shows it; saved with Done when it changed.
     @Published private(set) var opacity = ControlsOpacity.defaultValue
+    @Published var multiSelect = false
+    @Published private(set) var editingExpanded = false
+    private var lastExpandedScene = false
+    private var draftGame = GameControls()
+    private var displayEditors: [Bool: LayoutEditor] = [:]
+    private var editorBases: [Bool: GameControls] = [:]
     private var openedOpacity = ControlsOpacity.defaultValue
 
     /// Game options › Controls' row.
@@ -71,9 +77,15 @@ final class LayoutEditorSession: ObservableObject {
     /// Opens the editor on what the game plays with (`state`, resolved as the game resolves it).
     func open(titleID: String, title: String, host: Host, state: ControlsState) {
         guard opened == nil else { return }
+        multiSelect = false
+        editingExpanded = SceneDisplay.usesSideControls
+        lastExpandedScene = editingExpanded
+        draftGame = ControlsStore.shared.game(titleID)
+        displayEditors = [:]
+        editorBases = [editingExpanded: draftGame]
         let size = Self.windowSize, insets = Self.insets
-        editor = LayoutEditor(game: ControlsStore.shared.game(titleID), state: state, width: Double(size.width),
-                              height: Double(size.height), insets: insets)
+        editor = LayoutEditor(game: draftGame, state: state, width: Double(size.width),
+                              height: Double(size.height), insets: insets, expandedControls: editingExpanded)
         pad = LayoutEditorPad()
         opacity = state.opacity
         openedOpacity = state.opacity
@@ -91,7 +103,8 @@ final class LayoutEditorSession: ObservableObject {
         let store = ControlsStore.shared
         open(titleID: titleID, title: title, host: .gameOptions,
              state: ControlsState.resolve(game: store.game(titleID), defaults: store.defaults, controllerConnected: false,
-                                          compat: LaunchSettingsStore.compat.entry(for: titleID)?.controls))
+                                          compat: LaunchSettingsStore.compat.entry(for: titleID)?.controls,
+                                          expanded: SceneDisplay.usesSideControls))
     }
 
     /// Done: what changed saved (the layout and the game's own copy, none when it is the preset; the
@@ -102,7 +115,9 @@ final class LayoutEditorSession: ObservableObject {
         e.endGesture()
         let store = ControlsStore.shared
         let before = store.game(o.titleID)
-        var g = e.saved(into: before)
+        editor = e
+        flushAllEditors()
+        var g = draftGame
         if opacity != openedOpacity { g.opacity = opacity }
         if g != before { store.setGame(o.titleID, g) }
         Self.log("done for \(o.titleID): "
@@ -117,6 +132,8 @@ final class LayoutEditorSession: ObservableObject {
         guard let o = opened else { return }
         PadModal.shared.close()
         opened = nil
+        displayEditors = [:]
+        editorBases = [:]
         switch o.host {
         case .inGame: InGameMenu.shared.layoutEditorClosed()
         case .gameOptions: PadFocus.shared.reset(start: Self.gameRowID)
@@ -145,6 +162,7 @@ final class LayoutEditorSession: ObservableObject {
 
     /// Where A from the canvas rings: the inspector's first row, else the bar's Add.
     private var firstPanelItem: String {
+        if editor.selectedIDs.count > 1 { return "edit:groupSize" }
         guard let id = editor.selection, let d = editor.details(id) else { return "edit:add" }
         return d.slots.isEmpty ? "edit:label" : "edit:slot-0"
     }
@@ -152,20 +170,67 @@ final class LayoutEditorSession: ObservableObject {
     // MARK: touch and the panel
 
     func setView(_ size: CGSize) {
+        let expanded = SceneDisplay.usesSideControls
+        if expanded != lastExpandedScene {
+            lastExpandedScene = expanded
+            switchDisplay(to: expanded)
+        }
         let i = Self.insets
         guard Double(size.width) != editor.width || Double(size.height) != editor.height || i != editor.insets,
               size.width > 0, size.height > 0 else { return }
         editor.setView(width: Double(size.width), height: Double(size.height), insets: i)
     }
 
+    func switchDisplay(to expanded: Bool) {
+        guard isUp, expanded != editingExpanded else { return }
+        editor.endGesture()
+        flushEditor()
+        displayEditors[editingExpanded] = editor
+        editingExpanded = expanded
+        if var cached = displayEditors[expanded] {
+            cached.setView(width: editor.width, height: editor.height, insets: editor.insets)
+            editor = cached
+        } else {
+            editorBases[expanded] = draftGame
+            let state = draftState(expanded: expanded)
+            editor = LayoutEditor(game: draftGame, state: state, width: editor.width, height: editor.height,
+                                  insets: editor.insets, expandedControls: expanded)
+        }
+        pad = LayoutEditorPad()
+        multiSelect = false
+    }
+
+    private func draftState(expanded: Bool) -> ControlsState {
+        ControlsState.resolve(game: draftGame, defaults: ControlsStore.shared.defaults, controllerConnected: false,
+                              compat: opened.flatMap { LaunchSettingsStore.compat.entry(for: $0.titleID)?.controls }, expanded: expanded)
+    }
+
+    /// Rebase only the current display against the snapshot it opened on.
+    /// This also writes an undo back to the original inherited state after
+    /// switching displays, without restoring the other display's old copy.
+    private func flushEditor() {
+        editor.endGesture()
+        let value = editor.saved(into: editorBases[editingExpanded] ?? draftGame)
+        draftGame.copyDisplayLayout(from: value, expanded: editingExpanded)
+    }
+
+    private func flushAllEditors() {
+        flushEditor()
+        for (expanded, cached) in displayEditors where expanded != editingExpanded {
+            let value = cached.saved(into: editorBases[expanded] ?? draftGame)
+            draftGame.copyDisplayLayout(from: value, expanded: expanded)
+        }
+    }
+
     /// A tap on the canvas: the control under it, or none; the canvas has the controller then.
     func select(at p: CGPoint) {
-        editor.select(editor.control(atX: Double(p.x), y: Double(p.y)))
+        let id = editor.control(atX: Double(p.x), y: Double(p.y))
+        if multiSelect, let id { editor.toggleSelection(id) } else { editor.select(id) }
         pad.focus = .canvas
     }
 
     func select(_ id: String) {
-        editor.select(id)
+        if !editor.selectedIDs.contains(id) { editor.select(id) }
         pad.focus = .canvas
     }
 
@@ -175,6 +240,13 @@ final class LayoutEditorSession: ObservableObject {
     func undo() { editor.undo() }
     func redo() { editor.redo() }
     func reset() { editor.reset() }
+    func toggleMultiSelect() {
+        editor.endGesture()
+        multiSelect.toggle()
+        if !multiSelect { editor.select(editor.selection) }
+    }
+    func selectAll() { multiSelect = true; editor.selectAll() }
+    func editorSelectionClear() { editor.select(nil) }
 
     func add() {
         PadModal.shared.picker(title: "Add", context: opened?.title, note: "Placed in the middle; drag it where it goes.",
@@ -197,6 +269,84 @@ final class LayoutEditorSession: ObservableObject {
             guard let p = OnScreenLayout(rawValue: id) else { return }
             LayoutEditorSession.shared.editor.start(from: p)
         }
+    }
+
+    func chooseProfile() {
+        guard let profiles = ControlsStore.shared.layoutProfiles else {
+            PadModal.shared.picker(title: "Profiles unavailable", context: opened?.title,
+                note: "The saved profiles cannot be read by this version. They have been kept unchanged.",
+                options: [PadOption(id: "close", label: "Close")], selected: nil) { _ in }
+            return
+        }
+        PadModal.shared.picker(title: "Shared layout profiles", context: opened?.title,
+            note: "Each template contains Inner and Outer layouts. Apply copies both into this game; Done saves them.",
+            options: (0..<ControlLayoutProfiles.count).map {
+                PadOption(id: String($0), label: profiles.name($0), detail: profiles[$0] == nil ? "Empty" : "Shared template")
+            }, selected: nil) { value in
+                if let slot = Int(value) { LayoutEditorSession.shared.profileActions(slot) }
+            }
+    }
+
+    private func profileActions(_ slot: Int) {
+        guard let profiles = ControlsStore.shared.layoutProfiles else { return }
+        var options = [PadOption(id: "save", label: "Save both display layouts here")]
+        if profiles[slot] != nil {
+            options.insert(PadOption(id: "apply", label: "Apply both to this game"), at: 0)
+            options.append(PadOption(id: "rename", label: "Rename profile"))
+        }
+        PadModal.shared.picker(title: profiles.name(slot), context: opened?.title,
+            note: "Copies both display layouts. Game edits keep this template unchanged. Undo affects the current display; Cancel discards the editor session.",
+            options: options, selected: nil) { action in
+                let session = LayoutEditorSession.shared
+                switch action {
+                case "apply":
+                    if let profile = ControlsStore.shared.layoutProfiles?[slot] { session.applyProfile(profile) }
+                case "save":
+                    if profiles[slot] == nil { session.saveProfile(slot) }
+                    else {
+                        PadModal.shared.picker(title: "Replace shared profile?", context: profiles.name(slot),
+                            note: "Replaces this template only. Games already using a copy stay unchanged.",
+                            options: [PadOption(id: "cancel", label: "Cancel"), PadOption(id: "replace", label: "Replace template")],
+                            selected: "cancel") { if $0 == "replace" { session.saveProfile(slot) } }
+                    }
+                case "rename":
+                    PadModal.shared.keyboard(title: "Profile name", text: profiles.name(slot), maxLength: 32) {
+                        ControlsStore.shared.renameLayoutProfile(slot, to: $0)
+                    }
+                default: break
+                }
+            }
+    }
+
+    private func saveProfile(_ slot: Int) {
+        editor.endGesture()
+        flushAllEditors()
+        func variant(expanded: Bool) -> ControlLayoutProfiles.Variant {
+            if expanded == editingExpanded { return .init(preset: editor.preset, layout: editor.layout) }
+            let state = draftState(expanded: expanded)
+            let preset = state.layout == .off ? editor.preset : state.layout
+            let builtIn = preset.layout(dpad: state.dpad, rightStick: state.rightStick) ?? editor.layout
+            let layout = state.edited ?? (expanded ? builtIn.sideReachLayout() : builtIn)
+            return .init(preset: preset, layout: layout)
+        }
+        ControlsStore.shared.saveLayoutProfile(slot, outer: variant(expanded: false), inner: variant(expanded: true))
+    }
+
+    private func applyProfile(_ profile: ControlLayoutProfiles.Profile) {
+        editor.endGesture()
+        flushEditor()
+        let otherDisplay = !editingExpanded
+        var other: LayoutEditor
+        if let cached = displayEditors[otherDisplay] {
+            other = cached
+        } else {
+            editorBases[otherDisplay] = draftGame
+            other = LayoutEditor(game: draftGame, state: draftState(expanded: otherDisplay), width: editor.width,
+                                 height: editor.height, insets: editor.insets, expandedControls: otherDisplay)
+        }
+        other.apply(profile)
+        displayEditors[otherDisplay] = other
+        editor.apply(profile)
     }
 
     /// The bar's opacity: left and right step it, A and a tap go round.
@@ -308,7 +458,10 @@ struct LayoutEditorView: View {
             if let id = editor.selection, let d = editor.details(id) {
                 // On the half of the screen the control is not on.
                 let left = (editor.frame(of: id).map { $0.x + $0.width / 2 } ?? 0) >= editor.width / 2
-                inspector(d)
+                Group {
+                    if editor.selectedIDs.count > 1 { groupInspector }
+                    else { inspector(d) }
+                }
                     .padding(.top, max(54, safe.insets.top + 46))
                     .padding(.leading, left ? lead : 0).padding(.trailing, left ? 0 : trail)
                     .frame(maxWidth: .infinity, alignment: left ? .leading : .trailing)
@@ -316,7 +469,8 @@ struct LayoutEditorView: View {
             VStack {
                 Spacer()
                 HStack(alignment: .bottom, spacing: 12) {
-                    Text("Drag to move · pinch to resize · snaps to the grid and to other controls")
+                    Text((session.editingExpanded ? "Inner layout" : "Outer layout") + " · "
+                         + (session.multiSelect ? "Tap controls to add or remove · drag or pinch the group" : "Drag to move · pinch to resize · preview on the current screen"))
                         .font(.system(size: 11.5)).foregroundStyle(PP.soft).lineLimit(1).minimumScaleFactor(0.8)
                         .padding(.horizontal, 14).padding(.vertical, 7)
                         .background(PP.surface.opacity(0.86), in: Capsule())
@@ -340,14 +494,31 @@ struct LayoutEditorView: View {
 
     private var bar: some View {
         let e = session.editor
-        return HStack(spacing: 4) {
+        return ViewThatFits(in: .horizontal) {
+            editorBar(e)
+            ScrollView(.horizontal, showsIndicators: false) { editorBar(e) }
+        }
+    }
+
+    private func editorBar(_ e: LayoutEditor) -> some View {
+        HStack(spacing: 4) {
             barItem("edit:add", "＋ Add", hint: "Add") { session.add() }
+            barItem("edit:multi", session.multiSelect ? "Multi-select ✓" : "Multi-select", hint: "Select group", accent: session.multiSelect) { session.toggleMultiSelect() }
+            if session.multiSelect {
+                barItem("edit:all", "Select all", hint: "Select all") { session.selectAll() }
+                barItem("edit:clear", "Clear", hint: "Clear selection") { session.editorSelectionClear() }
+            }
             barItem("edit:preset", e.preset.title + " ▾", hint: "Start from") { session.choosePreset() }
+            barItem("edit:profiles", "Profiles ▾", hint: "Profiles") { session.chooseProfile() }
+            barItem("edit:display", session.editingExpanded ? "Editing: Inner" : "Editing: Outer", hint: "Switch display") {
+                session.switchDisplay(to: !session.editingExpanded)
+            }
             barItem("edit:opacity", "Opacity " + ControlsOpacity.label(session.opacity), hint: "Change",
                     adjust: { session.stepOpacity(by: $0) }) { session.stepOpacity(by: 1, wrapping: true) }
             barItem("edit:undo", "↶", hint: "Undo", enabled: e.canUndo) { session.undo() }
             barItem("edit:redo", "↷", hint: "Redo", enabled: e.canRedo) { session.redo() }
             barItem("edit:reset", "Reset", hint: "Reset", enabled: e.isEdited) { session.reset() }
+            barItem("edit:cancel", "Cancel", hint: "Discard game edits") { session.close() }
             barItem(LayoutEditorSession.doneID, "Done", hint: "Save", accent: true) { session.done() }
         }
         .padding(4)
@@ -356,6 +527,17 @@ struct LayoutEditorView: View {
     }
 
     private func ringed(_ id: String) -> Bool { session.pad.focus == .panel && focus.focused == id }
+
+    private var groupInspector: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("\(session.editor.selectedIDs.count) controls selected").font(PP.display(18))
+            Text("Drag a selected control to move the group. Pinch or use Size to resize together.")
+                .font(.system(size: 12)).foregroundStyle(PP.muted)
+            row("edit:groupSize", "Size", value: "‹  Group  ›", hint: "Bigger", adjust: { session.resize(by: $0) }) { session.resize(by: 1) }
+        }
+        .padding(14).frame(width: 262, alignment: .leading)
+        .background(PP.surface.opacity(0.96), in: RoundedRectangle(cornerRadius: 18))
+    }
 
     private func barItem(_ id: String, _ title: String, hint: String, enabled: Bool = true, accent: Bool = false,
                          adjust: ((Int) -> Void)? = nil, action: @escaping () -> Void) -> some View {
@@ -603,16 +785,22 @@ private final class LayoutCanvasView: UIView, UIGestureRecognizerDelegate {
         }
         place(e)
         // The selection: its box 6 pt outside it, the corner handles (a control that moves), its size.
-        if let id = e.selection, let f = e.frame(of: id).map(CGRect.init(touch:)), let d = e.details(id) {
+        if let id = e.selection, let f = e.selectionFrame.map(CGRect.init(touch:)), let d = e.details(id) {
             let r = f.insetBy(dx: -6, dy: -6)
-            box.path = UIBezierPath(roundedRect: r, cornerRadius: 10).cgPath
+            let path = UIBezierPath(roundedRect: r, cornerRadius: 10)
+            if e.selectedIDs.count > 1 {
+                for selected in e.selectedIDs {
+                    if let rect = e.frame(of: selected) { path.append(UIBezierPath(roundedRect: CGRect(touch: rect).insetBy(dx: -2, dy: -2), cornerRadius: 6)) }
+                }
+            }
+            box.path = path.cgPath
             box.isHidden = false
             for (h, c) in zip(handles, [CGPoint(x: r.minX, y: r.minY), CGPoint(x: r.maxX, y: r.minY),
                                         CGPoint(x: r.minX, y: r.maxY), CGPoint(x: r.maxX, y: r.maxY)]) {
                 h.center = c
                 h.isHidden = !d.movable
             }
-            badge.text = d.size
+            badge.text = e.selectedIDs.count > 1 ? "\(e.selectedIDs.count) selected" : d.size
             badge.isHidden = !d.movable
             let w = badge.intrinsicContentSize.width + 14
             badge.frame = CGRect(x: r.minX + 10, y: max(0, r.minY - 22), width: w, height: 16)
@@ -692,7 +880,7 @@ private final class LayoutCanvasView: UIView, UIGestureRecognizerDelegate {
             panSpent = false
             let start = CGPoint(x: p.x - t.x, y: p.y - t.y)
             let e = session.editor
-            if let id = e.selection, let f = e.frame(of: id).map(CGRect.init(touch:)), e.details(id)?.movable == true,
+            if let id = e.selection, let f = e.selectionFrame.map(CGRect.init(touch:)), e.details(id)?.movable == true,
                Self.grabsCorner(of: f.insetBy(dx: -6, dy: -6), at: start) {
                 pan = .handle(id, centre: TouchPoint(x: Double(f.midX), y: Double(f.midY)),
                               from: TouchPoint(x: Double(start.x), y: Double(start.y)))
@@ -725,7 +913,7 @@ private final class LayoutCanvasView: UIView, UIGestureRecognizerDelegate {
                 panSpent = true
             }
             let p = g.location(in: self), e = session.editor
-            if let id = e.selection, let f = e.frame(of: id).map(CGRect.init(touch:)), f.insetBy(dx: -24, dy: -24).contains(p) {
+            if let id = e.selection, let f = e.selectionFrame.map(CGRect.init(touch:)), f.insetBy(dx: -24, dy: -24).contains(p) {
                 pinchID = id
             } else {
                 pinchID = e.control(atX: Double(p.x), y: Double(p.y))

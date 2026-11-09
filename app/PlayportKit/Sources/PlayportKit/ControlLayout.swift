@@ -42,6 +42,27 @@
 import Foundation
 import HostIOKit
 
+extension ControlLayout {
+    /// Expanded scenes move each upper corner's preset group to its side's
+    /// midpoint, preserving spacing, actions and sizes. Saved custom layouts
+    /// opt out at the caller, so folding never rewrites the user's placement.
+    public func sideReachLayout() -> ControlLayout {
+        var result = self
+        for anchor in [ControlAnchor.topLeading, .topTrailing] {
+            let indices = controls.indices.filter { controls[$0].anchor == anchor && !controls[$0].isSurface }
+            guard !indices.isEmpty else { continue }
+            let top = indices.map { controls[$0].y - controls[$0].height / 2 }.min() ?? 0
+            let bottom = indices.map { controls[$0].y + controls[$0].height / 2 }.max() ?? 0
+            let middle = (top + bottom) / 2
+            for i in indices {
+                result.controls[i].anchor = anchor == .topLeading ? .leading : .trailing
+                result.controls[i].y -= middle
+            }
+        }
+        return result
+    }
+}
+
 /// The view's safe-area insets, in points.
 public struct ControlInsets: Equatable, Sendable {
     public var top: Double, left: Double, bottom: Double, right: Double

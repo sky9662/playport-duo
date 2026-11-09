@@ -17,5 +17,7 @@ enum SceneDisplay {
                       height: window.bounds.height * screen.nativeScale)
     }
     static var maximumRate: Int { window?.windowScene?.screen.maximumFramesPerSecond ?? 60 }
+    /// The expanded scene's layout class, rather than a model name or panel pixels.
+    static var usesSideControls: Bool { window?.traitCollection.horizontalSizeClass == .regular }
 }
 #endif

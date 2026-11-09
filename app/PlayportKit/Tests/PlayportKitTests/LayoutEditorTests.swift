@@ -6,6 +6,164 @@ import XCTest
 /// The layout editor's model (PLA-13, phase 5;
 /// LayoutEditor.dc.html) and the game's own copy it saves.
 final class LayoutEditorTests: XCTestCase {
+    func testApplyingABareProfileStillStoresIndependentCopiesAndUndoRestoresInheritance() throws {
+        var profiles = ControlLayoutProfiles()
+        profiles.save(0, preset: .gamepad, layout: .gamepad())
+        let profile = try XCTUnwrap(profiles[0])
+        var outer = LayoutEditor(preset: .gamepad, width: 800, height: 400)
+        outer.apply(profile)
+        XCTAssertTrue(outer.changed, "an explicit template copy differs from following a default even when positions match")
+        let stored = outer.saved(into: nil)
+        XCTAssertEqual(stored.layout, .gamepad)
+        XCTAssertEqual(stored.layouts[.gamepad], profile.outer.layout)
+        outer.undo()
+        XCTAssertTrue(outer.saved(into: nil).isEmpty)
+        outer.redo()
+        XCTAssertEqual(outer.saved(into: nil), stored)
+        var inner = LayoutEditor(preset: .gamepad, width: 800, height: 700, expandedControls: true)
+        inner.apply(profile)
+        let both = inner.saved(into: stored)
+        XCTAssertEqual(both.expandedLayouts[.gamepad], profile.inner.layout)
+        XCTAssertEqual(both.layouts[.gamepad], profile.outer.layout)
+        inner.undo()
+        let innerUndone = inner.saved(into: stored)
+        XCTAssertTrue(innerUndone.expandedLayouts.isEmpty)
+        XCTAssertEqual(innerUndone.layouts[.gamepad], profile.outer.layout)
+    }
+    func testInnerAndOuterEditsPersistIndependentlyAndUndoMergesOnlyItsDisplay() throws {
+        var original = GameControls(layout: .keyboardMouse, layouts: [.keyboardMouse: ControlLayout(controls: [space])])
+        original.mouseSensitivity = 2.5
+        var inner = LayoutEditor(game: original,
+            state: ControlsState.resolve(game: original, defaults: ControlsDefaults(), controllerConnected: false, expanded: true),
+            width: 800, height: 700, expandedControls: true)
+        inner.select("b"); inner.resize("b", by: 3)
+        var draft = inner.saved(into: original)
+        XCTAssertEqual(draft.layouts, original.layouts)
+        XCTAssertEqual(draft.layout, original.layout)
+        XCTAssertEqual(draft.mouseSensitivity, 2.5)
+        let innerLayout = try XCTUnwrap(draft.expandedLayouts[.keyboardMouse])
+        XCTAssertNotEqual(innerLayout, original.layouts[.keyboardMouse])
+        var outer = LayoutEditor(game: original,
+            state: ControlsState.resolve(game: original, defaults: ControlsDefaults(), controllerConnected: false), width: 800, height: 400)
+        outer.select("b"); outer.resize("b", by: 1)
+        draft.copyDisplayLayout(from: outer.saved(into: original), expanded: false)
+        XCTAssertEqual(draft.expandedLayouts[.keyboardMouse], innerLayout)
+        outer.undo()
+        draft.copyDisplayLayout(from: outer.saved(into: original), expanded: false)
+        XCTAssertEqual(draft.layouts, original.layouts)
+        XCTAssertEqual(draft.expandedLayouts[.keyboardMouse], innerLayout)
+        let restored = try JSONDecoder().decode(GameControls.self, from: JSONEncoder().encode(draft))
+        XCTAssertEqual(restored, draft)
+        XCTAssertEqual(ControlsState.resolve(game: restored, defaults: ControlsDefaults(), controllerConnected: false, expanded: true).edited, innerLayout)
+        XCTAssertEqual(ControlsState.resolve(game: restored, defaults: ControlsDefaults(), controllerConnected: false).edited, original.layouts[.keyboardMouse])
+    }
+
+    func testDualProfilesKeepBothVariantsAndMigrateAnEarlierSingleTemplate() throws {
+        let outer = ControlLayoutProfiles.Variant(preset: .keyboardMouse, layout: ControlLayout(controls: [space]))
+        var bigger = space; bigger.width = 96; bigger.height = 96
+        let inner = ControlLayoutProfiles.Variant(preset: .gamepad, layout: ControlLayout(controls: [bigger]))
+        var profiles = ControlLayoutProfiles()
+        profiles.save(0, outer: outer, inner: inner)
+        let profile = try XCTUnwrap(profiles[0])
+        XCTAssertEqual(profile.outer, outer); XCTAssertEqual(profile.inner, inner)
+        let restored = try JSONDecoder().decode(ControlLayoutProfiles.self, from: JSONEncoder().encode(profiles))
+        XCTAssertEqual(restored, profiles)
+        var innerEditor = LayoutEditor(preset: .keyboardMouse, width: 800, height: 700, expandedControls: true)
+        innerEditor.apply(profile)
+        XCTAssertEqual(innerEditor.preset, .gamepad)
+        XCTAssertEqual(innerEditor.layout, inner.layout)
+        let layout = try JSONSerialization.jsonObject(with: JSONEncoder().encode(outer.layout))
+        let legacy = try JSONSerialization.data(withJSONObject: ["slots": ["0": ["name": "Old", "preset": "keyboardMouse", "layout": layout]]])
+        let migrated = try JSONDecoder().decode(ControlLayoutProfiles.self, from: legacy)
+        XCTAssertEqual(migrated[0]?.outer, outer)
+        XCTAssertEqual(migrated[0]?.inner.layout, outer.layout.sideReachLayout())
+    }
+    func testExpandedPresetMovesUpperGroupsToSidesWithoutChangingCompactOrCustomLayouts() throws {
+        for preset in [OnScreenLayout.gamepad, .keyboardMouse, .pointClick] {
+            let state = ControlsState(layout: preset, visible: true, opacity: 0.6)
+            let compact = try XCTUnwrap(state.presentationLayout(expanded: false))
+            let expanded = try XCTUnwrap(state.presentationLayout(expanded: true))
+            for old in compact.controls {
+                let new = try XCTUnwrap(expanded.control(old.id))
+                XCTAssertEqual(new.actions, old.actions)
+                XCTAssertEqual(new.width, old.width)
+                XCTAssertEqual(new.height, old.height)
+                XCTAssertEqual(new.x, old.x)
+                switch old.anchor {
+                case .topLeading: XCTAssertEqual(new.anchor, .leading)
+                case .topTrailing: XCTAssertEqual(new.anchor, .trailing)
+                default: XCTAssertEqual(new, old)
+                }
+            }
+            let custom = ControlsState(layout: preset, visible: true, opacity: 0.6, edited: compact)
+            XCTAssertEqual(custom.presentationLayout(expanded: true), compact)
+            let editor = LayoutEditor(preset: preset, width: 800, height: 700, expandedControls: true)
+            XCTAssertEqual(editor.layout, expanded)
+            XCTAssertFalse(editor.isEdited)
+            XCTAssertFalse(editor.changed)
+            XCTAssertTrue(editor.saved(into: nil).isEmpty, "opening the editor must not freeze the expanded preset into every display")
+        }
+    }
+    func testGroupDragKeepsSpacingAtEdgesAndIsOneUndoStep() throws {
+        var other = space; other.id = "other"; other.x = 140
+        var e = editor([space, other])
+        e.toggleSelection("b"); e.toggleSelection("other")
+        let before = e.layout
+        let first = try XCTUnwrap(e.frame(of: "b")), second = try XCTUnwrap(e.frame(of: "other"))
+        e.drag("b", dx: 80, dy: 32)
+        e.drag("other", dx: 10000, dy: 10000)
+        e.endGesture()
+        let a = try XCTUnwrap(e.frame(of: "b")), b = try XCTUnwrap(e.frame(of: "other"))
+        XCTAssertEqual(b.x - a.x, second.x - first.x, accuracy: 0.001)
+        XCTAssertLessThanOrEqual(b.x + b.width, 800)
+        XCTAssertLessThanOrEqual(b.y + b.height, 400)
+        XCTAssertEqual(e.selectedIDs, ["b", "other"])
+        e.undo()
+        // Changing the drag's originating control starts another gesture.
+        e.undo()
+        XCTAssertEqual(e.layout, before)
+        e.redo(); e.redo()
+        XCTAssertEqual(e.frame(of: "other"), b)
+    }
+
+    func testGroupResizeScalesSpacingAndLeavesOtherControlsAlone() throws {
+        var second = space; second.id = "second"; second.x = 140
+        var untouched = space; untouched.id = "untouched"; untouched.x = 300
+        var e = editor([space, second, untouched])
+        e.select("b"); e.toggleSelection("second")
+        let before = e.layout
+        e.pinch("second", scale: 2)
+        e.endGesture()
+        let a = try XCTUnwrap(e.frame(of: "b")), b = try XCTUnwrap(e.frame(of: "second"))
+        XCTAssertEqual(a.width, 96, accuracy: 0.001)
+        XCTAssertEqual(b.x - a.x, 200, accuracy: 0.001)
+        XCTAssertEqual(e.layout.control("untouched"), untouched)
+        e.undo(); XCTAssertEqual(e.layout, before)
+        e.selectAll(); XCTAssertEqual(e.selectedIDs.count, 3)
+        e.select(nil); XCTAssertTrue(e.selectedIDs.isEmpty)
+    }
+
+    func testSharedProfilesAreIndependentCopiesAndApplyingCanBeUndone() throws {
+        var profiles = ControlLayoutProfiles()
+        profiles.save(0, preset: .keyboardMouse, layout: ControlLayout(controls: [space]))
+        profiles.rename(0, to: "  Keyboard  ")
+        XCTAssertEqual(profiles.name(0), "Keyboard")
+        XCTAssertNil(profiles[1]); XCTAssertNil(profiles[2])
+        profiles.save(3, preset: .keyboardMouse, layout: ControlLayout(controls: [space]))
+        XCTAssertNil(profiles[3])
+        let roundTrip = try JSONDecoder().decode(ControlLayoutProfiles.self, from: JSONEncoder().encode(profiles))
+        XCTAssertEqual(roundTrip, profiles)
+        var a = LayoutEditor(preset: .gamepad, width: 800, height: 400)
+        let original = a.layout
+        a.apply(try XCTUnwrap(profiles[0]))
+        a.undo(); XCTAssertEqual(a.layout, original)
+        a.redo(); a.select("b"); a.resize("b", by: 2)
+        let saved = a.saved(into: GameControls())
+        XCTAssertNotEqual(saved.layouts[.keyboardMouse], profiles[0]?.layout)
+        var b = LayoutEditor(preset: .gamepad, width: 800, height: 400)
+        b.apply(try XCTUnwrap(profiles[0]))
+        XCTAssertEqual(b.layout, ControlLayout(controls: [space]), "another game's copy uses the unchanged shared template")
+    }
     // MARK: the game's own copy
 
     func testAGamesEditedCopyIsDrawnForItsPresetAndRoundTrips() throws {

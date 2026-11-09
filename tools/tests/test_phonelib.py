@@ -485,7 +485,9 @@ class NetmuxdRestartTest(unittest.TestCase):
         for n in ("netmuxd", "pymobiledevice3"):
             os.chmod(os.path.join(stub, n), 0o755)
         s = socket.socket(socket.AF_UNIX)
-        s.bind(self.sock)
+        # sun_path has a small byte limit even when the workspace path is valid.
+        relative = os.path.relpath(self.sock)
+        s.bind(min((self.sock, relative), key=lambda path: len(os.fsencode(path))))
         self.addCleanup(s.close)
         return subprocess.run([os.path.join(REPO, "build", "install"), "--check", "--no-build"],
                               env=self.env(held), capture_output=True, text=True, timeout=120)

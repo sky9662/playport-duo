@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+module Relaunch {
+    header "relaunch.h"
+    header "pairing.h"
+    export *
+}

@@ -18,7 +18,7 @@ JOBS="${JOBS:-$(nproc)}"
 # name, url, commit (the branch each repository had as default on 2026-09-23)
 REPOS=(
     "cctools-port https://github.com/tpoechtrager/cctools-port.git 904de2a71d4da6a9b30d2efaf912a10ddc7d9ddb"         # 1030.6.3-ld64-956.6
-    "apple-libtapi https://github.com/tpoechtrager/apple-libtapi.git fa9443738c1a18accef4244732ec6d6ee97a8133"       # 1600.0.11.8
+    "apple-libtapi https://github.com/tpoechtrager/apple-libtapi.git a50ce143249082a1297af2e441c7057cd9103990"       # 1600.0.11.8 + arm64e.x1 TextAPI support
     "apple-libdispatch https://github.com/tpoechtrager/apple-libdispatch.git 323b9b4e0ca05d6c56a0c2f2d7d8d47363e612b7"
 )
 

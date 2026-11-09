@@ -10,7 +10,7 @@ says what the stage does, and `pp verify --help` lists the IPA checks.
 
 **Host tools.** The `inputs` stage checks for `clang`, `clang++`, `ld64.lld`,
 `llvm-ar`, `llvm-nm`, `llvm-objdump`, `llvm-objcopy`, `llvm-lipo` (host LLVM
-22.x), `gcc`, `make`, `bison`, `flex`, `msgfmt`, `cmake`, `ninja`, `meson`,
+23.1.3 or newer for Xcode 27 SDK support), `gcc`, `make`, `bison`, `flex`, `msgfmt`, `cmake`, `ninja`, `meson`,
 `python3`, `swift`, `xxd`, `openssl`, `patch`, `git`, `rsync` and `7za` (the
 Steam API emulator's dependency archives), and the Python
 module `pefile` (`app/tools/prefix-registry.py`). For the phone, `pp install`
@@ -28,10 +28,24 @@ socket, in `$PLAYPORT_BUILD/inputs.local` (gitignored; `build/env.sh` and
 | Variable | What | How to produce it |
 | --- | --- | --- |
 | `LLVM_MINGW` | llvm-mingw 20260922 UCRT, with its aarch64 CRT rebuilt for arm64ec | below |
-| `DARWIN_SDK` | xtool's SDK bundle (`iPhoneOS26.5.sdk`, `MacOSX26.5.sdk`) | `xtool sdk install <Xcode 26.6 .xip> --slim` |
+| `DARWIN_SDK` | xtool's SDK bundle with genuine iOS 27.1 and macOS 27 SDKs | `xtool sdk install <Xcode 27.1 .xip> --slim` |
 | `LD64` | Apple ld64-956.6 for Linux | `build/toolchain/ld64.sh` ("Linking") |
 | `XTOOL` | xtool 1.20.1 with the increased-memory-limit patch | `build/toolchain/xtool.sh` ("Signing") |
 | `RUST_ROOT` | the `pins.lock` `rust` release with the `aarch64-apple-ios` standard library, through rustup (`rustup-init` checked by sha256), with its crate cache | `build/toolchain/rust.sh` (the `idevice` stage) |
+
+For this Duo fork, do not relabel an older SDK as 27.1. `build/sdk_paths.py` reads
+platform roots from the installed bundle's `swift-sdk.json`. Put a recent host
+Clang and LLD on `PATH` before invoking the build; `HOST_CLANG` and `HOST_CLANGXX`
+can explicitly select them, and are resolved before stage-specific shims.
+Preserve previous SDK and linker installations when upgrading. On WSL, build LLVM-based tools on a Linux filesystem; configuring their source trees through the Windows filesystem can spend minutes waiting on metadata access.
+The LLVM iOS library cache uses separate directories for each SDK and host compiler
+configuration so CMake does not reuse platform settings from an older toolchain.
+The Swift build wrapper selects intrinsic headers from the host Swift compiler
+for its embedded Clang importer. Platform headers and Swift libraries still come
+from the selected Xcode SDK bundle.
+Vulkan's Meson configuration retries a transient clock-skew error at most three
+times, preserving each diagnostic. Other errors stop immediately; the build does
+not change the system clock or file timestamps to bypass the check.
 
 Apple's Metal developer tools are not an input: the AIR helpers are
 hand-ported LLVM IR (`build/air-helpers/README.md`) and `dxmt_command.metal`
@@ -343,7 +357,7 @@ committed; the build does not render them.
 ([decision 0038](decisions/0038-unsigned-release-ipas.md)): xtool signs it ad hoc
 with its entitlements and no certificate, profile, team or device, and `verify`
 runs `pp verify --unsigned` in place of the signature and profile checks. It is
-named `Playport-26.5-release-unsigned-<sha8>.ipa`; `pp install` never picks it.
+named `Playport-<SDK-version>-release-unsigned-<sha8>.ipa`; `pp install` never picks it.
 `pp release VERSION` reuses the newest such build of HEAD, or runs it
 (incrementally; `--clean` builds every tree afresh, [decision 0050](decisions/0050-release-reuses-the-build.md)), binds source/notices/instructions
 to its exact commit and requires distribution notice verification before a draft
@@ -357,7 +371,7 @@ The app links with Apple's ld64, not the SDK's `ld64.lld`: `libwineserver.a`
 and `libntdll_unix.a` both define four symbols, which ld64 resolves as
 Madeira's Xcode link does and lld refuses. `build/toolchain/ld64.sh` builds
 ld64 from cctools-port, apple-libtapi (the slow part) and apple-libdispatch
-at pinned commits, with `-D_GLIBCXX_NO_ASSERTIONS` (GCC 15's assertions abort
+at pinned commits. The libtapi pin includes arm64e.x1 TextAPI support for Xcode 27 SDKs. Build it with `-D_GLIBCXX_NO_ASSERTIONS` (GCC 15's assertions abort
 in ld64's Objective-C pass). `build/ld64/swift-build` is the SwiftPM toolset
 xtool runs: the per-target `-r` steps go to `ld64.lld`, every final link to ld64.
 

@@ -79,13 +79,13 @@ stage_shims() {
 #!/bin/sh
 case " \$* " in
 *" -arch arm64 "*|*" -miphoneos-version-min="*|*"iPhoneOS"*)
-    exec /usr/bin/clang --target=arm64-apple-ios17.0 -fuse-ld=lld \\
+    exec "$HOST_CLANG" --target=arm64-apple-ios17.0 -fuse-ld=lld \\
         -Wno-unused-command-line-argument \\
         '-ffile-prefix-map=$ROOT=unix' '-ffile-prefix-map=$DARWIN_SDK=darwin-sdk' "\$@" ;;
 esac
-exec /usr/bin/clang "\$@"
+exec "$HOST_CLANG" "\$@"
 EOF
-    sed 's|/usr/bin/clang |/usr/bin/clang++ |g' "$SHIMS/clang" > "$SHIMS/clang++"
+    sed "s|$HOST_CLANG|$HOST_CLANGXX|g" "$SHIMS/clang" > "$SHIMS/clang++"
     ln -sf clang "$SHIMS/cc"; ln -sf clang++ "$SHIMS/c++"   # CMake's default compiler names
     cat > "$SHIMS/xcrun" <<EOF
 #!/bin/sh

@@ -53,7 +53,7 @@ configured() { [ -f "$WINE/$1/Makefile" ] && [ "$(cat "$WINE/$1/.pp-configured" 
 #    tools tree, so create that link too.
 GST=$(bash "$HERE/gstreamer.sh" fetch)
 KEY=$({ sha256sum "$HERE/wine-pe.sh" "$WINE/configure"; echo "$M $MACSDK $GST"
-        /usr/bin/clang --version; "$M/bin/clang" --version; } | sha256sum | cut -c1-16)
+        $HOST_CLANG --version; "$M/bin/clang" --version; } | sha256sum | cut -c1-16)
 if configured build-tools; then
     echo "build-tools: configured as before; make rebuilds what changed"
 else
@@ -69,7 +69,7 @@ fi
 # 3. Two darwin-host trees: build-macos supplies i386 + aarch64-windows
 #    (new WoW64), build-arm64ec supplies arm64ec-windows.
 #    PE code is compiled by llvm-mingw's clang in MSVC mode (--with-mingw=clang
-#    path -> -target <cpu>-windows); host code by /usr/bin/clang for darwin.
+#    path -> -target <cpu>-windows); host code by $HOST_CLANG for darwin.
 #    CROSSLDFLAGS=-Wl,-Brepro makes lld-link write a content-hash timestamp
 #    instead of the link time, and CROSSCFLAGS (configure's default -g -O2)
 #    maps the tree and llvm-mingw out of the debug info, so the PE checksums
@@ -126,9 +126,9 @@ configure_tree() {
     fi
     rm -rf "${WINE:?}/${1:?}"; mkdir "$WINE/$1"
     ( cd "$WINE/$1" &&
-      CC="/usr/bin/clang --target=aarch64-apple-darwin -isysroot $MACSDK" \
-      CXX="/usr/bin/clang++ --target=aarch64-apple-darwin -isysroot $MACSDK" \
-      OBJC="/usr/bin/clang -x objective-c --target=aarch64-apple-darwin -isysroot $MACSDK" \
+      CC="$HOST_CLANG --target=aarch64-apple-darwin -isysroot $MACSDK" \
+      CXX="$HOST_CLANGXX --target=aarch64-apple-darwin -isysroot $MACSDK" \
+      OBJC="$HOST_CLANG -x objective-c --target=aarch64-apple-darwin -isysroot $MACSDK" \
       AR=/usr/bin/llvm-ar RANLIB=/usr/bin/llvm-ranlib STRIP=/usr/bin/llvm-strip \
       LDFLAGS="-fuse-ld=lld" CROSSLDFLAGS="-Wl,-Brepro" \
       GSTREAMER_CFLAGS="-I$OUT/gst-macos -I$GST/Headers" GSTREAMER_LIBS="-Wl,-undefined,dynamic_lookup" \

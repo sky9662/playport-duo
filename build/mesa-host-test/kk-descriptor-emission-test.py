@@ -35,7 +35,9 @@ entry = next(e for e in json.loads((build / 'compile_commands.json').read_text()
              if e['file'].endswith('/kk_debug.c'))
 args = shlex.split(entry['command'])
 args = (args[:1] + ['-I' + str(source.parent)] + args[1:args.index('-MD')]
-        + ['-O2', '-UNDEBUG', '-ffunction-sections', '-fdata-sections'])
+        # Fortified libc aliases bypass --wrap's fault-injection seams. This
+        # affects these test objects only, not the driver built above.
+        + ['-O2', '-UNDEBUG', '-U_FORTIFY_SOURCE', '-ffunction-sections', '-fdata-sections'])
 if getpath_seam:
     # Only the Darwin path query is simulated; fds/stat/getfl/writes stay real.
     args += ['-DF_GETPATH=50', '-DTEST_GETPATH=1']

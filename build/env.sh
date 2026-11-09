@@ -13,7 +13,7 @@
 #                   $PLAYPORT_BUILD)
 #   LLVM_MINGW      llvm-mingw 20260922 UCRT with the arm64ec CRT rebuilt
 #                   (docs/BUILDING.md, "llvm-mingw")
-#   DARWIN_SDK      xtool's darwin SDK bundle (iPhoneOS26.5.sdk, MacOSX26.5.sdk)
+#   DARWIN_SDK      xtool's darwin SDK bundle (platform roots read from swift-sdk.json)
 #   LD64            Apple ld64-956.6 built for Linux (build/toolchain/ld64.sh)
 #   XTOOL           xtool 1.20.1 with build/toolchain/xtool-1.20.1-increased-memory-limit.diff
 #   RUST_ROOT       the pins.lock rust release with the aarch64-apple-ios std, installed
@@ -42,6 +42,11 @@ unset _inputs_local
 : "${LD64:=$PLAYPORT_BUILD/inputs/apple-linker/prefix/bin/arm64-apple-darwin-ld}"
 : "${XTOOL:=$PLAYPORT_BUILD/inputs/xtool-src/.build/release/xtool}"
 : "${RUST_ROOT:=$PLAYPORT_BUILD/inputs/rust}"
-IOSSDK=$DARWIN_SDK/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk
-MACSDK=$DARWIN_SDK/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk
+IOSSDK=$(python3 "$PLAYPORT_REPO/build/sdk_paths.py" "$DARWIN_SDK" ios)
+IOSSDK_VERSION=$(python3 "$PLAYPORT_REPO/build/sdk_paths.py" "$DARWIN_SDK" ios version)
+MACSDK=$(python3 "$PLAYPORT_REPO/build/sdk_paths.py" "$DARWIN_SDK" macos)
 export PLAYPORT_BUILD PLAYPORT_DEVICE_DIR LLVM_MINGW DARWIN_SDK LD64 XTOOL RUST_ROOT
+
+# Resolve the host compiler once before a stage prepends its own compiler shims.
+: "${HOST_CLANG:=$(command -v clang)}" "${HOST_CLANGXX:=$(command -v clang++)}"
+export HOST_CLANG HOST_CLANGXX

@@ -54,5 +54,11 @@ EOF
 chmod +x "$out/ld"
 printf '{ "schemaVersion": "1.0", "rootPath": ".", "linker": { "path": "ld" } }\n' > "$out/toolset.json"
 unset SWIFTPM_CUSTOM_BIN_DIR
+# Swift embeds its own Clang importer. Its intrinsic headers must match that
+# compiler rather than the newer Clang headers in Xcode's Swift resources.
+# This changes importer resources only; the selected platform SDK is unchanged.
+swift_clang=$(swiftc -print-target-info | python3 -c 'import json,sys; print(json.load(sys.stdin)["paths"]["runtimeResourcePath"] + "/clang")')
+[ -d "$swift_clang/include" ] || { echo "swift-build: Swift compiler intrinsic headers not found" >&2; exit 1; }
 exec swift build "$@" --toolset "$out/toolset.json" \
-    -Xswiftc -file-prefix-map -Xswiftc "$repo=." -Xcc "-ffile-prefix-map=$repo=."
+    -Xswiftc -file-prefix-map -Xswiftc "$repo=." -Xcc "-ffile-prefix-map=$repo=." \
+    -Xswiftc -Xcc -Xswiftc -resource-dir -Xswiftc -Xcc -Xswiftc "$swift_clang"

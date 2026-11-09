@@ -13,7 +13,7 @@
 #              after `unix`
 #   TBLGEN     LLVM 15.0.7 host llvm-tblgen (air-helper-port.sh `llvm`)
 #   LLVM_IOS   the LLVM iOS build directory, version-keyed and reused across
-#              runs (default $PLAYPORT_BUILD/cache/llvm-ios-15.0.7-sdkcxx)
+#              runs (default cache key includes the SDK and host compiler)
 #   LD64       build/lib.sh; CMake's link checks need a Mach-O linker.
 #              LIBTOOL: the cctools libtool next to it.
 #
@@ -28,13 +28,14 @@ set -euo pipefail
 ROOT=$(realpath -m "${1:?usage: $0 ROOT}")
 . "$(dirname "$0")/../lib.sh"
 DXMT_UNIX=$(realpath "${DXMT_UNIX:?set DXMT_UNIX to a stages/dxmt-patched.sh ROOT}")
-TBLGEN=${TBLGEN:?set TBLGEN to an LLVM 15.0.7 llvm-tblgen}
+TBLGEN=$(realpath "${TBLGEN:?set TBLGEN to an LLVM 15.0.7 llvm-tblgen}")
 LLVM_TAG=$(pin llvm-project)
 # resolved: a cache/ reached through a symlink must configure the same build
 # directory, or CMake re-records it and ninja rebuilds it all
-# -sdkcxx: built with the SDK's libc++ headers (below); the tree of an older
-# build, with the host's, stays where it is for that build.
-LLVM_IOS=$(realpath -m "${LLVM_IOS:-$PLAYPORT_BUILD/cache/llvm-ios-${LLVM_TAG#llvmorg-}-sdkcxx}")
+# CMake resets cached cross-compilation flags when its compiler changes. Keep
+# distinct SDK/compiler configurations separate, preserving the previous build.
+LLVM_IOS_KEY=$(printf '%s\n' "$IOSSDK" "$HOST_CLANG" "$("$HOST_CLANG" --version)" | sha256sum | cut -c1-12)
+LLVM_IOS=$(realpath -m "${LLVM_IOS:-$PLAYPORT_BUILD/cache/llvm-ios-${LLVM_TAG#llvmorg-}-sdkcxx-$LLVM_IOS_KEY}")
 LIBTOOL=${LIBTOOL:-$(dirname "$LD64")/arm64-apple-darwin-libtool}
 SDK=$IOSSDK
 TARGET=arm64-apple-ios18.0   # the slice's own target (stages/dxmt-base.sh unix)
@@ -50,7 +51,7 @@ echo "== llvm-ios (LLVM 15.0.7 static libraries for $TARGET)"
 cmake -G Ninja -S "$LLVM_PROJECT/llvm" -B "$LLVM_IOS" \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT="$SDK" \
     -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 \
-    -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+    -DCMAKE_C_COMPILER="$HOST_CLANG" -DCMAKE_CXX_COMPILER="$HOST_CLANGXX" \
     -DCMAKE_C_COMPILER_TARGET=$TARGET -DCMAKE_CXX_COMPILER_TARGET=$TARGET -DCMAKE_ASM_COMPILER_TARGET=$TARGET \
     -DCMAKE_AR="$(command -v llvm-ar)" -DCMAKE_RANLIB="$(command -v llvm-ranlib)" \
     -DCMAKE_EXE_LINKER_FLAGS="--ld-path=$LD64" -DCMAKE_SHARED_LINKER_FLAGS="--ld-path=$LD64" \

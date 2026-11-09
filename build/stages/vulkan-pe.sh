@@ -126,7 +126,7 @@ stage_src() {
 stage_dxvk() {
     cross_file
     rm -rf "$ROOT/build-dxvk"
-    (cd "$ROOT/dxvk" && PATH=$MINGW/bin:$PATH meson setup --cross-file "$ROOT/cross-$ARCH.txt" \
+    (cd "$ROOT/dxvk" && PATH=$MINGW/bin:$PATH python3 "$HERE/../meson_setup.py" --cross-file "$ROOT/cross-$ARCH.txt" \
         --buildtype release -Dbuild_id=false "$ROOT/build-dxvk") > "$ROOT/meson-dxvk.log"
     PATH=$MINGW/bin:$PATH ninja -C "$ROOT/build-dxvk" -j "$JOBS" > "$ROOT/ninja-dxvk.log"
     for f in d3d8/d3d8.dll d3d9/d3d9.dll d3d10/d3d10core.dll d3d11/d3d11.dll dxgi/dxgi.dll; do
@@ -142,7 +142,7 @@ stage_dxvk32() {
     ARCH=i686
     cross_file
     rm -rf "$ROOT/build-dxvk32"
-    (cd "$ROOT/dxvk" && PATH=$MINGW/bin:$PATH meson setup --cross-file "$ROOT/cross-$ARCH.txt" \
+    (cd "$ROOT/dxvk" && PATH=$MINGW/bin:$PATH python3 "$HERE/../meson_setup.py" --cross-file "$ROOT/cross-$ARCH.txt" \
         --buildtype release -Dbuild_id=false -Denable_d3d8=false "$ROOT/build-dxvk32") > "$ROOT/meson-dxvk32.log"
     PATH=$MINGW/bin:$PATH ninja -C "$ROOT/build-dxvk32" -j "$JOBS" > "$ROOT/ninja-dxvk32.log"
     for f in d3d9/d3d9.dll d3d10/d3d10core.dll d3d11/d3d11.dll dxgi/dxgi.dll; do
@@ -157,7 +157,7 @@ stage_dxgi_aarch64() {
     ARCH=aarch64
     cross_file
     rm -rf "$ROOT/build-dxvk-aarch64"
-    (cd "$ROOT/dxvk" && PATH=$MINGW/bin:$PATH meson setup --cross-file "$ROOT/cross-$ARCH.txt" \
+    (cd "$ROOT/dxvk" && PATH=$MINGW/bin:$PATH python3 "$HERE/../meson_setup.py" --cross-file "$ROOT/cross-$ARCH.txt" \
         --buildtype release -Dbuild_id=false -Denable_d3d8=false -Denable_d3d9=false -Denable_d3d10=false \
         -Denable_d3d11=false "$ROOT/build-dxvk-aarch64") > "$ROOT/meson-dxvk-aarch64.log"
     PATH=$MINGW/bin:$PATH ninja -C "$ROOT/build-dxvk-aarch64" -j "$JOBS" > "$ROOT/ninja-dxvk-aarch64.log"
@@ -173,7 +173,7 @@ stage_vkd3d() {
         [ "$ARCH" = arm64ec ] || build=$ROOT/build-vkd3d-$ARCH
         cross_file
         rm -rf "$build"
-        (cd "$ROOT/vkd3d-proton" && PATH=$MINGW/bin:$PATH meson setup --cross-file "$ROOT/cross-$ARCH.txt" \
+        (cd "$ROOT/vkd3d-proton" && PATH=$MINGW/bin:$PATH python3 "$HERE/../meson_setup.py" --cross-file "$ROOT/cross-$ARCH.txt" \
             --buildtype release -Denable_tests=false -Denable_extras=false "$build") > "$ROOT/meson-vkd3d-$ARCH.log"
         PATH=$MINGW/bin:$PATH ninja -C "$build" -j "$JOBS" > "$ROOT/ninja-vkd3d-$ARCH.log"
         install_dll "$build/libs/d3d12/d3d12.dll"

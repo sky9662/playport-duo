@@ -25,9 +25,9 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"))
 import inputs  # noqa: E402
+from sdk_paths import sdk_root  # noqa: E402
 import phonelib  # noqa: E402
 
-IOS_SDK = "Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk"
 OPTIONS = {"--llvm-mingw": "LLVM_MINGW", "--darwin-sdk": "DARWIN_SDK", "--usbmux-socket": "PLAYPORT_USBMUX_SOCKET"}
 
 
@@ -66,8 +66,10 @@ def problem(key, v):
         if not os.path.isfile(os.path.join(v, "aarch64-w64-mingw32/lib/libgcc.a")):
             return "no arm64ec CRT rebuild (docs/BUILDING.md, llvm-mingw)"
     elif key == "DARWIN_SDK":
-        if not os.path.isdir(os.path.join(v, IOS_SDK)):
-            return f"no {os.path.basename(IOS_SDK)} (xtool sdk install; docs/BUILDING.md)"
+        try:
+            sdk_root(v, "ios")
+        except (OSError, ValueError, KeyError):
+            return "no usable iOS SDK in swift-sdk.json (xtool sdk install; docs/BUILDING.md)"
     elif key == "PLAYPORT_USBMUX_SOCKET":
         try:
             if not stat.S_ISSOCK(os.stat(v).st_mode):

@@ -180,6 +180,12 @@ final class InGameMenu: ObservableObject {
         case .opacity:
             let next = ControlsOpacity.step(now.opacity, by: by)
             mine.opacity = wrapping && next == now.opacity ? ControlsOpacity.steps[0] : next
+        case .trackpadSensitivity:
+            mine.trackpadSensitivity = PointerSensitivity.step(mine.trackpadSensitivity(over: ControlsStore.shared.defaults),
+                                                               by: by, wrapping: wrapping)
+        case .mouseSensitivity:
+            mine.mouseSensitivity = PointerSensitivity.step(mine.mouseSensitivity(over: ControlsStore.shared.defaults),
+                                                            by: by, wrapping: wrapping)
         case .gyro:
             mine.gyro = GyroRow.output.setting(GyroRow.output.step(ControlsStore.shared.gyro(id), by: by, wrapping: wrapping),
                                                in: mine.gyro)
@@ -579,6 +585,7 @@ struct InGameMenuView: View {
 /// on a screen too short for all of them (seven on a 375 pt tall one) the rows
 /// scroll, and the ringed row is scrolled to.
 private struct ControlsPanel: View {
+    @ObservedObject private var store = ControlsStore.shared
     let ring: QuickMenuControlsRow
     let state: ControlsState
     /// The game's gyro aim, its own over the defaults.
@@ -636,6 +643,14 @@ private struct ControlsPanel: View {
         case .dpad: row(.dpad) { choices(.dpad, OnScreenDpad.allCases, state.dpad, title: \.title) }
         case .rightStick: row(.rightStick) { choices(.rightStick, OnScreenRightStick.allCases, state.rightStick, title: \.shortTitle) }
         case .opacity: row(.opacity) { stepper(.opacity, ControlsOpacity.label(state.opacity)) }
+        case .trackpadSensitivity:
+            row(.trackpadSensitivity, subtitle: "Sensitivity · applies on Resume") {
+                stepper(.trackpadSensitivity, PointerSensitivity.label(pointerSensitivity(trackpad: true)))
+            }
+        case .mouseSensitivity:
+            row(.mouseSensitivity, subtitle: "Mouse and relative touch look") {
+                stepper(.mouseSensitivity, PointerSensitivity.label(pointerSensitivity(trackpad: false)))
+            }
         case .gyro: row(.gyro, subtitle: gyroSource) { choices(.gyro, GyroOutput.allCases, gyro.output, title: \.gyroTitle) }
         case .gyroSensitivity: row(.gyroSensitivity) { stepper(.gyroSensitivity, GyroText.sensitivity(gyro.sensitivity)) }
         case .controllerMap:
@@ -647,6 +662,12 @@ private struct ControlsPanel: View {
     }
 
     /// Under Gyro aim: the gyro it reads (QuickMenuControls.dc.html's "iPhone gyro").
+    private func pointerSensitivity(trackpad: Bool) -> Double {
+        let game = TitleLaunch.shared.titleID.map { store.game($0) }
+        return trackpad ? game?.trackpadSensitivity(over: store.defaults) ?? store.defaults.trackpadSensitivity
+                        : game?.mouseSensitivity(over: store.defaults) ?? store.defaults.mouseSensitivity
+    }
+
     private var gyroSource: String {
         let use = GyroText.sourceInUse(gyro.source, device: GyroSensors.shared.device(for: gyro))
         guard gyro.output != .off else { return "Moves the view as you turn" }

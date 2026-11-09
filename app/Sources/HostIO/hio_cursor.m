@@ -67,6 +67,10 @@ void host_game_cursor_image(int w, int h, int hx, int hy, const void *bgra) {
 }
 
 void host_game_cursor_present(double x, double y, double w, double h, int allowed) {
+    host_game_cursor_present_scaled(x, y, w, h, allowed, 1);
+}
+
+void host_game_cursor_present_scaled(double x, double y, double w, double h, int allowed, double scale) {
     host_cursor_position p;
     int show;
     unsigned long long generation;
@@ -75,8 +79,8 @@ void host_game_cursor_present(double x, double y, double w, double h, int allowe
     pthread_mutex_unlock(&cursor_lock);
     host_game_cursor_layer();
     host_cursor_rect r;
-    show = allowed && show && displayed_image == generation && cursor.contents && host_cursor_map(p,
-        (host_cursor_rect){x, y, w, h}, image_width, image_height, hot_x, hot_y, &r);
+    show = allowed && show && displayed_image == generation && cursor.contents && host_cursor_map_scaled(p,
+        (host_cursor_rect){x, y, w, h}, image_width, image_height, hot_x, hot_y, scale, &r);
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     cursor.hidden = !show;

@@ -4,17 +4,24 @@ public struct GameCompatibility: Codable, Equatable, Sendable {
     public var cursor: Bool?
     public var sharedImage: Bool?
     public var openGL41: Bool?
-    public init(cursor: Bool? = nil, sharedImage: Bool? = nil, openGL41: Bool? = nil) {
+    public var cursorScale: Double?
+    public init(cursor: Bool? = nil, sharedImage: Bool? = nil, openGL41: Bool? = nil, cursorScale: Double? = nil) {
         self.cursor = cursor; self.sharedImage = sharedImage; self.openGL41 = openGL41
+        self.cursorScale = Self.keptCursorScale(cursorScale)
     }
-    public var isEmpty: Bool { cursor == nil && sharedImage == nil && openGL41 == nil }
+    public static func keptCursorScale(_ value: Double?) -> Double? {
+        value.flatMap { $0.isFinite && (1...4).contains($0) ? $0 : nil }
+    }
+    public static func defaultCursorScale(appID: UInt32?) -> Double { appID == 1444480 ? 2 : 1 }
+    public var isEmpty: Bool { cursor == nil && sharedImage == nil && openGL41 == nil && cursorScale == nil }
     /// Explicit Off also removes inherited shared-file and process environment overrides.
     public var configRemovals: Set<String> {
         openGL41 == false ? ["env.MESA_GL_VERSION_OVERRIDE", "env.MESA_GLSL_VERSION_OVERRIDE"] : []
     }
     public func over(_ base: GameCompatibility) -> GameCompatibility {
         GameCompatibility(cursor: cursor ?? base.cursor, sharedImage: sharedImage ?? base.sharedImage,
-                          openGL41: openGL41 ?? base.openGL41)
+                          openGL41: openGL41 ?? base.openGL41,
+                          cursorScale: Self.keptCursorScale(cursorScale) ?? Self.keptCursorScale(base.cursorScale))
     }
     /// Apply last, including explicit removal of profile flags, after release filtering and title keys.
     public func applying(to config: [String: String]) -> [String: String] {

@@ -962,7 +962,7 @@ private struct GameDetailPage: View {
     @ViewBuilder
     private func gameRows(_ t: InstalledTitle, _ g: SteamGame?) -> some View {
         let settings = launchSettings.binding(for: t.id)
-        GameCompatibilityRows(gameID: t.id)
+        GameCompatibilityRows(gameID: t.id, appID: t.appID)
         PointerSensitivityRows(gameID: t.id)
         PadSectionHeader(text: "Game").id("game")
         if let g, t.source == .installed, branches.count > 1 {

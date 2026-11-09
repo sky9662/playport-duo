@@ -4,12 +4,33 @@ import SwiftUI
 
 struct GameCompatibilityRows: View {
     var gameID: String? = nil
+    var appID: UInt32? = nil
     @ObservedObject private var store = LaunchSettingsStore.shared
 
     var body: some View {
         row("cursor", "Game cursor", "Show the cursor when the game requests it", \.cursor, defaultOn: true)
+        cursorSize
         row("sharedImage", "DOOM memory compatibility", "Fixes a memory mapping issue; change before starting", \.sharedImage, defaultOn: true)
         row("openGL41", "OpenGL 4.1 compatibility", "Turing compatibility profile; change before starting", \.openGL41, defaultOn: nil)
+    }
+
+    private var cursorSize: some View {
+        let binding = gameID.map { store.binding(for: $0) } ?? $store.global
+        let own = GameCompatibility.keptCursorScale(binding.wrappedValue.compatibility.cursorScale)
+        let inherited = (gameID == nil ? nil : GameCompatibility.keptCursorScale(store.global.compatibility.cursorScale))
+            ?? GameCompatibility.defaultCursorScale(appID: appID)
+        return PadRow(id: (gameID == nil ? "set:" : "opt:") + "cursorSize", title: "Cursor size",
+                      subtitle: "Enlarge the game cursor; its click point stays aligned",
+                      value: (own == nil ? "Default · " : "") + PointerSensitivity.label(own ?? inherited),
+                      accessory: .chevron, changed: own != nil, hint: "Change",
+                      reset: { binding.wrappedValue.compatibility.cursorScale = nil }) {
+            PadModal.shared.picker(title: "Cursor size", context: "Game cursor", note: "Applies immediately. Turing Complete defaults to 200%.",
+                options: [PadOption(id: "", label: "Default", detail: PointerSensitivity.label(inherited))]
+                    + [1.0, 1.5, 2, 2.5, 3, 4].map { PadOption(id: String($0), label: PointerSensitivity.label($0)) },
+                selected: own.map { String($0) } ?? "") {
+                    binding.wrappedValue.compatibility.cursorScale = GameCompatibility.keptCursorScale(Double($0))
+                }
+        }
     }
 
     private func row(_ id: String, _ title: String, _ note: String, _ key: WritableKeyPath<GameCompatibility, Bool?>,

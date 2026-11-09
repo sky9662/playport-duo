@@ -37,4 +37,16 @@ void host_game_cursor_image(int w, int h, int hx, int hy, const void *bgra);
 void host_game_cursor_show(int show);
 void *host_game_cursor_layer(void);
 void host_game_cursor_present(double x, double y, double w, double h, int allowed);
+/* Enlarge around the hotspot, keeping its screen position unchanged. */
+static inline int host_cursor_map_scaled(host_cursor_position p, host_cursor_rect picture,
+                                         int iw, int ih, int hx, int hy, double scale,
+                                         host_cursor_rect *out) {
+    if (!isfinite(scale) || scale < 1 || scale > 4) scale = 1;
+    if (!host_cursor_map(p, picture, iw, ih, hx, hy, out)) return 0;
+    out->x -= hx * picture.w / p.client.w * (scale - 1);
+    out->y -= hy * picture.h / p.client.h * (scale - 1);
+    out->w *= scale; out->h *= scale;
+    return 1;
+}
+void host_game_cursor_present_scaled(double x, double y, double w, double h, int allowed, double scale);
 #endif

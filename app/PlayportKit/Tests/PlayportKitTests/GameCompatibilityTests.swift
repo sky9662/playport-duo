@@ -4,6 +4,17 @@ import XCTest
 @testable import PlayportKit
 
 final class GameCompatibilityTests: XCTestCase {
+    func testCursorSizeInheritancePersistenceAndSafeDefaults() throws {
+        let global = GameCompatibility(cursorScale: 2.5)
+        XCTAssertEqual(GameCompatibility().over(global).cursorScale, 2.5)
+        XCTAssertEqual(GameCompatibility(cursorScale: 1).over(global).cursorScale, 1)
+        XCTAssertEqual(GameCompatibility.defaultCursorScale(appID: 1444480), 2)
+        XCTAssertEqual(GameCompatibility.defaultCursorScale(appID: 379720), 1)
+        XCTAssertNil(GameCompatibility.keptCursorScale(.infinity))
+        XCTAssertNil(GameCompatibility.keptCursorScale(0))
+        XCTAssertFalse(global.isEmpty)
+        XCTAssertEqual(try JSONDecoder().decode(GameCompatibility.self, from: JSONEncoder().encode(global)), global)
+    }
     func testReleaseFilteringPreservesChoicesAndRemovesProfileFlags() throws {
         let profile = LaunchSettings(runtime: "env.MESA_GL_VERSION_OVERRIDE=4.1 env.MESA_GLSL_VERSION_OVERRIDE=410")
         let global = LaunchSettings(compatibility: GameCompatibility(cursor: false, sharedImage: false, openGL41: false))

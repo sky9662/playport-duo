@@ -8,6 +8,11 @@ int main(void) {
     host_cursor_position p = {1060, 590, {100, 50, 1920, 1080}};
     assert(host_cursor_map(p, picture, 32, 32, 4, 6, &r));
     EQ(r.x,538); EQ(r.y,287); EQ(r.w,16); EQ(r.h,16);
+    assert(host_cursor_map_scaled(p, picture, 32, 32, 4, 6, 2.5, &r));
+    EQ(r.w,40); EQ(r.h,40);
+    EQ(r.x + 4 * 0.5 * 2.5,540); EQ(r.y + 6 * 0.5 * 2.5,290);
+    assert(host_cursor_map_scaled(p, picture, 32, 32, 4, 6, NAN, &r));
+    EQ(r.x,538); EQ(r.y,287); EQ(r.w,16);
     /* Absolute guest warp after arbitrarily many relative inputs: no drift. */
     p.x=100; p.y=50;
     assert(host_cursor_map(p,picture,32,32,4,6,&r)); EQ(r.x,58); EQ(r.y,17);

@@ -4,6 +4,16 @@ import XCTest
 @testable import PlayportKit
 
 final class PointerSensitivityTests: XCTestCase {
+    func testInGameStepsReach250PercentAndClampOrWrapAtEnds() {
+        XCTAssertEqual(PointerSensitivity.step(2, by: 1), 2.5)
+        XCTAssertEqual(PointerSensitivity.step(3, by: -1), 2.5)
+        XCTAssertEqual(PointerSensitivity.step(4, by: 1), 4)
+        XCTAssertEqual(PointerSensitivity.step(4, by: 1, wrapping: true), 0.1)
+        XCTAssertEqual(PointerSensitivity.step(0.1, by: -1), 0.1)
+        let rows = QuickMenuControlsRow.shown(controller: false, state: ControlsState.resolve(game: nil, defaults: ControlsDefaults(), controllerConnected: false))
+        XCTAssertTrue(rows.contains(.trackpadSensitivity))
+        XCTAssertTrue(rows.contains(.mouseSensitivity))
+    }
     func testOldRecordsInheritAndNewFieldsRoundTrip() throws {
         var game = try JSONDecoder().decode(GameControls.self, from: Data("{}".utf8))
         XCTAssertTrue(game.isEmpty)

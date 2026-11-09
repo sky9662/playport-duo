@@ -3,6 +3,7 @@
 import UIKit
 import QuartzCore
 import HostIO
+import PlayportKit
 
 /// Presentation only: Wine owns position, clipping, shape and visibility.
 /// A display tick observes drawable-size changes even without a UIKit layout.
@@ -47,10 +48,13 @@ final class GuestCursorOverlay: UIView {
             CATransaction.commit()
             lastPicture = picture
         }
-        let allowed = (LaunchSettingsStore.shared.compatibility(for: TitleLaunch.shared.titleID).cursor ?? true)
+        let compatibility = LaunchSettingsStore.shared.compatibility(for: TitleLaunch.shared.titleID)
+        let scale = GameCompatibility.keptCursorScale(compatibility.cursorScale)
+            ?? GameCompatibility.defaultCursorScale(appID: TitleLaunch.shared.appID)
+        let allowed = (compatibility.cursor ?? true)
             && window != nil && HostIO.shared.cursorAllowed && !GuestWindows.shown
             && UIApplication.shared.applicationState == .active
-        host_game_cursor_present(picture.minX, picture.minY, picture.width, picture.height, allowed ? 1 : 0)
+        host_game_cursor_present_scaled(picture.minX, picture.minY, picture.width, picture.height, allowed ? 1 : 0, scale)
     }
 
     @MainActor private final class Tick: NSObject {

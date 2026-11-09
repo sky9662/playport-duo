@@ -6,15 +6,16 @@ This fork is not an official Playport release and is not endorsed by the upstrea
 
 ## Development status
 
-Fork changes are under development. There is no device-validated Duo release available
-from this repository yet. Do not treat upstream release downloads as builds of this fork.
+Fork changes are under development. A native iOS 27.1 SDK candidate has passed
+packaging checks; device validation remains pending. There is no device-validated
+Duo release available from this repository yet.
 
-The current build-tool checkpoint is on the
+The fork implementation is on the
 [duo-development branch](https://github.com/sky9662/playport-duo/tree/duo-development).
-That checkpoint does not yet contain all local app changes.
 
 ## Documentation
 
+- [Duo settings and validation limits](https://github.com/sky9662/playport-duo/blob/duo-development/docs/DUO.md)
 - [Building](docs/BUILDING.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Device requirements](docs/DEVICE.md)

@@ -56,7 +56,7 @@ class Rebase(unittest.TestCase):
         commit(fex, trailer("P5 port e3", "clean"), links=link, **{"e.c": lines(5, l3="both")})
         # fex: P4 c.c line 5 (upstream edits line 7, in its context: a 3-way merge).
         commit(fex, trailer("P4 playport c5"), links=link, **{"c.c": lines(20, l5="fex 5")})
-        repo = self.repo = f"{t}/playport"
+        repo = self.repo = new_repo(f"{t}/playport")
         for s, rng in (("fex-port", f"{self.b0}..HEAD~1"), ("fex", "HEAD~1..HEAD")):
             d = f"{repo}/patches/{s}"
             git(fex, "-c", "core.abbrev=7", "format-patch", "-q", "--zero-commit", "--no-signature", "-o", d, rng)
@@ -220,7 +220,7 @@ class MisplacedClean(unittest.TestCase):
         self.b0 = commit(fex, "fex", **{"dup.c": dup_c(), "f.c": lines(10)})
         commit(fex, trailer("P1 port second block", "clean"), **{"dup.c": dup_c(second="    x += 2;")})
         commit(fex, trailer("P2 port f", "clean"), **{"f.c": lines(10, l5="port 5")})
-        repo = self.repo = f"{t}/playport"
+        repo = self.repo = new_repo(f"{t}/playport")
         d = f"{repo}/patches/fex-port"
         git(fex, "-c", "core.abbrev=7", "format-patch", "-q", "--zero-commit", "--no-signature", "-o", d,
             f"{self.b0}..HEAD")

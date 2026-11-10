@@ -4,6 +4,20 @@ import XCTest
 @testable import PlayportKit
 
 final class GameCompatibilityTests: XCTestCase {
+    func testCursorSmoothingPersistsAndOwnOffWins() throws {
+        let global = GameCompatibility(cursorSmooth: true)
+        XCTAssertTrue(GameCompatibility().over(global).cursorSmooth == true)
+        let own = GameCompatibility(cursorSmooth: false).over(global)
+        XCTAssertEqual(own.cursorSmooth, false)
+        XCTAssertFalse(own.isEmpty)
+        XCTAssertEqual(try JSONDecoder().decode(GameCompatibility.self, from: JSONEncoder().encode(own)), own)
+    }
+
+    func testOpenGLProfileStatusMatchesBothActualOverrides() {
+        XCTAssertTrue(GameCompatibility.profileUsesOpenGL41(["env.MESA_GL_VERSION_OVERRIDE":"4.1", "env.MESA_GLSL_VERSION_OVERRIDE":"410"]))
+        XCTAssertFalse(GameCompatibility.profileUsesOpenGL41(["env.MESA_GL_VERSION_OVERRIDE":"4.1"]))
+        XCTAssertFalse(GameCompatibility.profileUsesOpenGL41([:]))
+    }
     func testCursorSizeInheritancePersistenceAndSafeDefaults() throws {
         let global = GameCompatibility(cursorScale: 2.5)
         XCTAssertEqual(GameCompatibility().over(global).cursorScale, 2.5)

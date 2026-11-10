@@ -49,6 +49,7 @@ final class GuestCursorOverlay: UIView {
             lastPicture = picture
         }
         let compatibility = LaunchSettingsStore.shared.compatibility(for: TitleLaunch.shared.titleID)
+        host_game_cursor_filter((compatibility.cursorSmooth ?? true) ? 1 : 0)
         let scale = GameCompatibility.keptCursorScale(compatibility.cursorScale)
             ?? GameCompatibility.defaultCursorScale(appID: TitleLaunch.shared.appID)
         let allowed = (compatibility.cursor ?? true)

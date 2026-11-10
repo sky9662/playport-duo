@@ -4,6 +4,28 @@
 #include <stdio.h>
 #define EQ(a,b) assert(fabs((a)-(b)) < 0.000001)
 int main(void) {
+    host_cursor_clip_state clip = {0};
+    host_cursor_bounds desktop = {0,0,1920,1440}, game = {0,180,1920,1260}, next;
+    assert(host_cursor_clip_plan(&clip,desktop,game,1,&next));
+    assert(host_cursor_bounds_equal(next,game));
+    assert(!host_cursor_clip_plan(&clip,game,game,1,&next));
+    /* Hide/mouselook restores the pre-existing range. */
+    assert(host_cursor_clip_plan(&clip,game,game,0,&next));
+    assert(host_cursor_bounds_equal(next,desktop));
+    /* Never widen a game's capture, or undo its later change. */
+    host_cursor_bounds narrow = {400,300,600,500};
+    assert(!host_cursor_clip_plan(&clip,narrow,game,1,&next));
+    assert(host_cursor_clip_plan(&clip,desktop,game,1,&next));
+    assert(!host_cursor_clip_plan(&clip,narrow,game,0,&next));
+    /* Negative origins, a moved client and an invalid/empty target. */
+    desktop=(host_cursor_bounds){-1000,-500,2000,1500};
+    game=(host_cursor_bounds){-800,-200,500,900};
+    assert(host_cursor_clip_plan(&clip,desktop,game,1,&next));
+    host_cursor_bounds moved={0,0,1000,1000};
+    assert(host_cursor_clip_plan(&clip,game,moved,1,&next));
+    assert(host_cursor_bounds_equal(next,moved));
+    assert(host_cursor_clip_plan(&clip,moved,(host_cursor_bounds){0,0,0,0},1,&next));
+    assert(host_cursor_bounds_equal(next,desktop));
     host_cursor_rect r, picture = {60, 20, 960, 540};
     host_cursor_position p = {1060, 590, {100, 50, 1920, 1080}};
     assert(host_cursor_map(p, picture, 32, 32, 4, 6, &r));

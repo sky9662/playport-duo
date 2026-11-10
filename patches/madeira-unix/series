@@ -258,3 +258,4 @@
 0289-virtual-make-small-shared-image-compatibility-adjustable.patch
 0290-win32u-include-four-three-resolution-levels.patch
 0291-win32u-refresh-scene-mode-capacity.patch
+0292-win32u-confine-visible-game-pointers.patch

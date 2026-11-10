@@ -9,6 +9,8 @@
 static pthread_mutex_t cursor_lock = PTHREAD_MUTEX_INITIALIZER;
 static host_cursor_position position;
 static int visible;
+static int presentation_allowed;
+static host_cursor_clip_state clip_state;
 static unsigned long long requested_image;
 /* Main thread only, including image creation and layer mutation. */
 static CALayer *cursor;
@@ -25,6 +27,24 @@ void host_game_cursor_show(int show) {
     pthread_mutex_lock(&cursor_lock);
     visible = !!show;
     pthread_mutex_unlock(&cursor_lock);
+}
+
+int host_game_cursor_confine(int active, int left, int top, int right, int bottom,
+                             int cl, int ct, int cr, int cb, int *ol, int *ot, int *oright, int *ob) {
+    if (!ol || !ot || !oright || !ob) return 0;
+    host_cursor_bounds out;
+    pthread_mutex_lock(&cursor_lock);
+    int changed = host_cursor_clip_plan(&clip_state, (host_cursor_bounds){cl,ct,cr,cb},
+        (host_cursor_bounds){left,top,right,bottom}, active && presentation_allowed && visible, &out);
+    pthread_mutex_unlock(&cursor_lock);
+    if (changed) { *ol=out.left; *ot=out.top; *oright=out.right; *ob=out.bottom; }
+    return changed;
+}
+
+void host_game_cursor_filter(int smooth) {
+    host_game_cursor_layer();
+    cursor.magnificationFilter = smooth ? kCAFilterLinear : kCAFilterNearest;
+    cursor.minificationFilter = smooth ? kCAFilterLinear : kCAFilterNearest;
 }
 
 void *host_game_cursor_layer(void) {
@@ -52,7 +72,7 @@ void host_game_cursor_image(int w, int h, int hx, int hy, const void *bgra) {
         CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
         CGDataProviderRef provider = CGDataProviderCreateWithCFData((__bridge CFDataRef)data);
         CGImageRef image = CGImageCreate(w, h, 8, 32, w * 4, cs,
-            kCGBitmapByteOrder32Little | kCGImageAlphaFirst, provider, NULL, false,
+            kCGBitmapByteOrder32Little | kCGImageAlphaFirst, provider, NULL, true,
             kCGRenderingIntentDefault);
         if (image) {
             host_game_cursor_layer();
@@ -75,6 +95,7 @@ void host_game_cursor_present_scaled(double x, double y, double w, double h, int
     int show;
     unsigned long long generation;
     pthread_mutex_lock(&cursor_lock);
+    presentation_allowed = !!allowed;
     p = position; show = visible; generation = requested_image;
     pthread_mutex_unlock(&cursor_lock);
     host_game_cursor_layer();

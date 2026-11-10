@@ -6,6 +6,12 @@ Settings > Graphics and each game's options expose Game cursor, DOOM memory comp
 
 Cursor size is adjustable from 100% to 400% in the same settings. Turing Complete defaults to 200%; other games retain 100%. Scaling enlarges the image around its hotspot, so the guest click position stays unchanged. Choose 100% to restore the original presentation.
 
+Smooth cursor scaling uses linear filtering when enlarging the game's original cursor image. Turn it off to retain sharp pixel edges. Filtering does not add detail to a low resolution source image or replace the game's custom cursor shape.
+
+The visible game cursor is confined in Wine to the foreground client's rectangle, intersected with any narrower game clip. This constrains the actual Windows input position rather than drawing an arrow at a different location. Only the clip installed by this feature is restored when the cursor is hidden, host UI is shown or presentation loses focus; a later clip set by the game is left alone. Letterboxing remains supported. This confinement still requires owner validation with a letterboxed game and a game using hidden-cursor mouse look.
+
+The OpenGL 4.1 compatibility row displays Default · On when the game's profile supplies both OpenGL 4.1 and GLSL 410 overrides. These are Mesa version overrides for shader compatibility, not a promise that the renderer implements every OpenGL 4.1 feature. The release UI can explicitly enable or remove them; restart the game to apply a change.
+
 Settings > Controls and each game's options offer independent touch trackpad and mouse sensitivity from 10% to 400%. Mouse sensitivity also controls relative touch look. Absolute tapping, scrolling, controller look and gyro remain separate. A game's Default follows Settings; resetting Settings restores 100%.
 
 The running game's menu (three-finger tap, or hold a controller's Home button) also exposes both sensitivity steppers under Controls, including 250%. Changes are saved for that game and take effect when resuming. These are constant multipliers; no speed-dependent acceleration is applied.

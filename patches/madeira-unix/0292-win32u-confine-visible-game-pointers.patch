@@ -1,0 +1,97 @@
+From 850487dd556e7d5a88a0eba2214726b521ececde Mon Sep 17 00:00:00 2001
+From: Codex <local@example.invalid>
+Date: Tue, 10 Nov 2026 15:12:07 +0800
+Subject: [PATCH] win32u: confine visible game pointers to the client
+
+Class: host-app
+Evidence: app/tests/cursor_test.c; native build and owner validation pending
+Offered-upstream: no; private fork candidate
+---
+ build/win32u-unix/driver_ios.c | 47 ++++++++++++++++++++++++++++++++++
+ 1 file changed, 47 insertions(+)
+
+diff --git a/build/win32u-unix/driver_ios.c b/build/win32u-unix/driver_ios.c
+index 5af0382..5b78b94 100644
+--- a/build/win32u-unix/driver_ios.c
++++ b/build/win32u-unix/driver_ios.c
+@@ -69,9 +69,12 @@ static struct user_driver_funcs winios_user_driver;
+  * types). Call this from pProcessEvents drain or directly from a
+  * deferred Swift dispatch — it just packages an INPUT_MOUSE event and
+  * hands it to NtUserSendHardwareInput. */
++static void winios_drv_confine_cursor(void);
++
+ void winios_drv_post_mouse(int x, int y, unsigned int flags, unsigned int mouse_data, HWND hwnd)
+ {
+     INPUT input;
++    winios_drv_confine_cursor();
+     input.type           = INPUT_MOUSE;
+     input.mi.dx          = x;
+     input.mi.dy          = y;
+@@ -293,6 +296,48 @@ extern void winios_cursor_show( int show ) __attribute__((weak));
+ 
+ static int winios_desktop_mode(void);
+ 
++
++/* Keep a visible game pointer in its real client area. The host remembers
++ * only our clip; an explicit narrower game clip wins, and hiding the cursor,
++ * opening host UI or losing focus restores the previous range. All Wine
++ * calls remain on Wine threads, before hardware input reaches the server. */
++extern int host_game_cursor_confine(int, int, int, int, int, int, int, int, int,
++                                    int *, int *, int *, int *) __attribute__((weak));
++static pthread_mutex_t winios_cursor_clip_lock = PTHREAD_MUTEX_INITIALIZER;
++static void winios_drv_confine_cursor(void)
++{
++    static __thread int updating;
++    CURSORINFO info = {sizeof(info)};
++    RECT client = {0}, current, next;
++    HWND fg;
++    BOOL active = FALSE;
++    struct ratio dpi;
++    if (updating || !host_game_cursor_confine) return;
++    updating = 1;
++    pthread_mutex_lock(&winios_cursor_clip_lock);
++    dpi = get_thread_dpi();
++    if (!NtUserGetClipCursor(&current)) goto done;
++    current = map_rect_virt_to_raw(current, dpi);
++    fg = NtUserGetForegroundWindow();
++    if (!winios_desktop_mode() && NtUserGetCursorInfo(&info) && (info.flags & CURSOR_SHOWING)
++        && fg && fg != get_desktop_window()
++        && get_client_rect_rel(fg, COORDS_SCREEN, &client, dpi) && !IsRectEmpty(&client))
++    {
++        client = map_rect_virt_to_raw(client, dpi);
++        active = TRUE;
++    }
++    if (host_game_cursor_confine(active, client.left, client.top, client.right, client.bottom,
++            current.left, current.top, current.right, current.bottom,
++            &next.left, &next.top, &next.right, &next.bottom))
++    {
++        next = map_rect_raw_to_virt(next, dpi);
++        NtUserClipCursor(&next);
++    }
++done:
++    pthread_mutex_unlock(&winios_cursor_clip_lock);
++    updating = 0;
++}
++
+ /* Playport: sample authoritative RAW desktop pixels after the input drain.
+  * GetCursorPos would apply the calling thread's DPI virtualization. Read the
+  * desktop snapshot instead and transform the client rect to the same space.
+@@ -331,6 +376,7 @@ hidden:
+ 
+ static BOOL winios_drv_process_events(DWORD mask)
+ {
++    winios_drv_confine_cursor();
+     BOOL result = winios_pProcessEvents(mask);
+     winios_drv_sync_cursor();
+     return result;
+@@ -370,6 +416,7 @@ static void winios_drv_set_cursor( HWND hwnd, HCURSOR cursor )
+     if (!cursor)
+     {
+         if (winios_cursor_show) winios_cursor_show( 0 );
++        winios_drv_confine_cursor();
+         return;
+     }
+     if (winios_desktop_mode() && cursor == winios_last_cursor)
+-- 
+2.56.0
+

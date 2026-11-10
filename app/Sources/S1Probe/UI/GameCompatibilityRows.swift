@@ -10,8 +10,19 @@ struct GameCompatibilityRows: View {
     var body: some View {
         row("cursor", "Game cursor", "Show the cursor when the game requests it", \.cursor, defaultOn: true)
         cursorSize
+        row("cursorSmooth", "Smooth cursor scaling", "Smooths enlarged game cursors; Off keeps original pixel edges", \.cursorSmooth, defaultOn: true)
         row("sharedImage", "DOOM memory compatibility", "Fixes a memory mapping issue; change before starting", \.sharedImage, defaultOn: true)
-        row("openGL41", "OpenGL 4.1 compatibility", "Turing compatibility profile; change before starting", \.openGL41, defaultOn: nil)
+        row("openGL41", "OpenGL 4.1 compatibility",
+            profileGL41 == true ? "Game profile enables OpenGL 4.1 / GLSL 410 overrides. Restart the game after changing."
+                : "Use OpenGL 4.1 / GLSL 410 version overrides for shader compatibility. Restart the game after changing.",
+            \.openGL41, defaultOn: profileGL41)
+    }
+
+    private var profileGL41: Bool? {
+        guard let gameID else { return nil }
+        let settings = store.compat(for: gameID)?.settings
+        return settings?.compatibility.openGL41
+            ?? GameCompatibility.profileUsesOpenGL41(LaunchSettings.releaseRuntime(compat: settings))
     }
 
     private var cursorSize: some View {

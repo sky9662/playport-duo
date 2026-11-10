@@ -21,6 +21,10 @@ The fork implementation is on the
 - [Device requirements](docs/DEVICE.md)
 - [Licensing and third-party notices](docs/LICENSING.md)
 
+[Upstream compatibility reports](https://playport.dev/compatibility/) describe
+upstream builds and do not establish compatibility with this fork. Report Duo
+problems using this fork's [problem template](https://github.com/sky9662/playport-duo/issues/new?template=problem.yml).
+
 ## Attribution and licensing
 
 Original Playport code and its copyright notices are retained.

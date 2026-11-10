@@ -15,6 +15,7 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_remotepairing-pairable-host._tcp</string>
+		<string>_remotepairing._tcp</string>
 	</array>
 	<!-- The pairing code's picture-in-picture window over Settings (PairingCodeWindow.swift);
 	     picture in picture requires this mode. The app plays no audio of its own there. -->

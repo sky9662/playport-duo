@@ -46,13 +46,14 @@ static void say(playport_relaunch_log log, void *ctx, const char *fmt, const cha
         }                                                                                \
     } while (0)
 
-int playport_relaunch(const uint8_t *pairing, size_t pairing_len, const char *host, const char *bundle_id,
+int playport_relaunch(const uint8_t *pairing, size_t pairing_len, const char *host, uint16_t port, const char *bundle_id,
                       playport_relaunch_log log, void *ctx) {
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof addr);
     addr.sin_len = sizeof addr;
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(49152);   // RemotePairing's tunnel port, as StikJIT's default
+    if (!port) { log("bad RemotePairing port", ctx); return 1; }
+    addr.sin_port = htons(port);
     if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) { log("bad host address", ctx); return 1; }
 
     struct RpPairingFileHandle *pf = NULL;

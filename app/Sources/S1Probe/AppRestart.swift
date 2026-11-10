@@ -30,6 +30,7 @@
 //   prerequisites and no second restart (continuePlay).
 
 import Foundation
+import EndpointKit
 import PlayportKit
 import Relaunch
 import SwiftUI
@@ -164,8 +165,11 @@ final class AppRestart: ObservableObject {
         do { pairing = try BuiltInJit.pairingData() } catch { return "\(error)" }
         guard let bundle = Bundle.main.bundleIdentifier else { return "no bundle identifier" }
         let sink = Sink(start: started)
+        let discovered = RemotePairingEndpoint.discover()
+        let port = discovered ?? RemotePairingEndpoint.fallback
+        sink.say("RemotePairing port \(port) (\(discovered == nil ? "fallback" : "Bonjour on this phone"))")
         let rc = pairing.withUnsafeBytes { raw in
-            playport_relaunch(raw.bindMemory(to: UInt8.self).baseAddress, raw.count, host, bundle, { line, ctx in
+            playport_relaunch(raw.bindMemory(to: UInt8.self).baseAddress, raw.count, host, port, bundle, { line, ctx in
                 guard let line, let ctx else { return }
                 Unmanaged<Sink>.fromOpaque(ctx).takeUnretainedValue().say(String(cString: line))
             }, Unmanaged.passUnretained(sink).toOpaque())

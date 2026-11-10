@@ -15,6 +15,7 @@
 // serial queue, as its integration guide requires.
 
 import Foundation
+import EndpointKit
 import JITHelperXPC
 import StikJIT
 import SharedMemory
@@ -30,6 +31,13 @@ final class JITHelper: NSObject, NSExtensionRequestHandling, JITHelping {
     /// and needs no download again until reset.
     private static let ddi = DDIPaths.default(
         in: FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0].appendingPathComponent("StikJIT"))
+
+    private func configuration() -> StikJIT.Configuration {
+        let discovered = RemotePairingEndpoint.discover()
+        let port = discovered ?? RemotePairingEndpoint.fallback
+        say("RemotePairing port \(port) (\(discovered == nil ? "fallback" : "Bonjour on this phone"))")
+        return StikJIT.Configuration(rsdPort: port)
+    }
 
     func beginRequest(with context: NSExtensionContext) {
         guard let item = context.inputItems.first as? NSExtensionItem,
@@ -59,7 +67,7 @@ final class JITHelper: NSObject, NSExtensionRequestHandling, JITHelping {
             }
             do {
                 try withPairingFile(pairingFile) { url in
-                    try StikJIT.enableJIT(targetPID: targetPID, pairingFile: url, ddiPaths: Self.ddi, script: .custom(script),
+                    try StikJIT.enableJIT(targetPID: targetPID, pairingFile: url, ddiPaths: Self.ddi, configuration: configuration(), script: .custom(script),
                                           preparationProgress: { self.say("prepare: \(Self.describe($0))") },
                                           progress: { self.say($0) })
                 }
@@ -76,7 +84,7 @@ final class JITHelper: NSObject, NSExtensionRequestHandling, JITHelping {
         queue.async { [self] in
             do {
                 let readiness = try withPairingFile(pairingFile) { url in
-                    StikJIT.prepareDevice(pairingFile: url, paths: Self.ddi) { self.say("prepare: \(Self.describe($0))") }
+                    StikJIT.prepareDevice(pairingFile: url, paths: Self.ddi, configuration: configuration()) { self.say("prepare: \(Self.describe($0))") }
                 }
                 switch readiness {
                 case .ready(let state):
@@ -223,7 +231,7 @@ final class JITHelper: NSObject, NSExtensionRequestHandling, JITHelping {
                 let result: String
                 do {
                     let r = try self.withPairingFile(pairingFile) { url in
-                        StikJIT.prepareDevice(pairingFile: url, paths: Self.ddi) { stage in
+                        StikJIT.prepareDevice(pairingFile: url, paths: Self.ddi, configuration: self.configuration()) { stage in
                             self.probe("prepareDevice: \(Self.describe(stage))")
                         }
                     }

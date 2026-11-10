@@ -8,7 +8,7 @@ import subprocess
 
 # The app's Swift packages with host tests.
 SWIFT_PACKAGES = ["app/HostIOKit", "app/ContentKit", "app/GOGClient", "app/EpicClient", "app/SteamClient", "app/BattleNetClient",
-                  "app/PlayportKit"]
+                  "app/PlayportKit", "app/EndpointKit"]
 
 
 def _anycase(words):

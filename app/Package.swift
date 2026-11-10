@@ -51,6 +51,7 @@ let package = Package(
         ),
     ],
     dependencies: [
+        .package(path: "EndpointKit"),
         // The host I/O decisions (key map, pads, lifecycle order), tested on the Linux host.
         .package(path: "HostIOKit"),
         // The native Steam protocol client (app/SteamClient). The app uses SteamClientKit only;
@@ -155,7 +156,8 @@ let package = Package(
         .target(name: "PlayportJITEntry"),
         .target(
             name: "PlayportJIT",
-            dependencies: ["StikJIT", "JITHelperXPC", "PlayportJITEntry", "SharedMemory"],
+            dependencies: ["StikJIT", "JITHelperXPC", "PlayportJITEntry", "SharedMemory",
+                           .product(name: "EndpointKit", package: "EndpointKit")],
             swiftSettings: [.swiftLanguageMode(.v5)] + (release ? [.define("PLAYPORT_RELEASE")] : []),
             linkerSettings: [
                 // Nothing references the principal class but the Objective-C
@@ -167,6 +169,7 @@ let package = Package(
         .target(
             name: app,
             dependencies: ["WineHost", "WinIOS", "HostIO", "JITHelperXPC", "KosmicKrisp", "MesaEGL", "MesaGallium",
+                           .product(name: "EndpointKit", package: "EndpointKit"),
                            .product(name: "HostIOKit", package: "HostIOKit"),
                            .product(name: "SteamClientKit", package: "SteamClient"),
                            .product(name: "GOGClientKit", package: "GOGClient"),

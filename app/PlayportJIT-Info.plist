@@ -9,6 +9,12 @@
 	<string>1</string>
 	<key>CFBundleDisplayName</key>
 	<string>Playport JIT</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Playport finds this iPhone's game debugging service.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_remotepairing._tcp</string>
+	</array>
 	<!-- The JIT helper (Sources/PlayportJIT). A borrowed system extension point
 	     that nothing activates (FALSEPREDICATE): only the app starts it, through
 	     NSExtension (Sources/S1Probe/BuiltInJit.swift). -->

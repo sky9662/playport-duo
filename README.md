@@ -4,14 +4,23 @@ An unofficial community fork of [Playport](https://github.com/playportdev/playpo
 which is built on [willfaust/Madeira](https://github.com/willfaust/Madeira).
 This fork is not an official Playport release and is not endorsed by the upstream authors.
 
-## Development status
+## Current stable release
 
-Fork changes are under development. A native iOS 27.1 SDK candidate has passed
-packaging checks; device validation remains pending. There is no device-validated
-Duo release available from this repository yet.
+[Playport Duo Next07](https://github.com/sky9662/playport-duo/releases/tag/duo-next07)
+is the current owner-approved stable release of this fork. The owner reported
+Puyo Puyo Tetris runs and approved this exact build. Native release packaging,
+distribution checks and source checks passed; long-session stability and
+compatibility with every game or device are not established.
+
+The release includes the unsigned IPA, complete Corresponding Source and checksums.
+Re-sign with the existing sideloading tool/account and **upgrade in place; do not
+uninstall an existing installation**, which deletes its container and local data.
+See the [release record](docs/DUO-RELEASES.md) for the exact build and acceptance scope.
 
 The fork implementation is on the
 [duo-development branch](https://github.com/sky9662/playport-duo/tree/duo-development).
+The fixed release source is tagged
+[duo-next07](https://github.com/sky9662/playport-duo/tree/duo-next07).
 
 ## Documentation
 
@@ -20,6 +29,10 @@ The fork implementation is on the
 - [Architecture](docs/ARCHITECTURE.md)
 - [Device requirements](docs/DEVICE.md)
 - [Licensing and third-party notices](docs/LICENSING.md)
+
+[Upstream compatibility reports](https://playport.dev/compatibility/) describe
+upstream builds and do not establish compatibility with this fork. Report Duo
+problems using this fork's [problem template](https://github.com/sky9662/playport-duo/issues/new?template=problem.yml).
 
 ## Attribution and licensing
 

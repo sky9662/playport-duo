@@ -1,5 +1,11 @@
 {
   "titles": {
+    "app-546050": {
+      "settings": {
+        "jitPoolMB": 512
+      },
+      "reason": "Local startup trial: the executable has stripped relocations and needs its preferred base. Two launches with the 896 MiB pool left the executable window unheld and failed with STATUS_CONFLICTING_ADDRESSES. Use 512 MiB to preserve the fixed-image window; device startup and sustained gameplay remain to be validated."
+    },
     "app-15100": {
       "controls": "keyboardMouse",
       "reason": "This game takes no controller on PC without a third-party fix (its Options list only keyboard layouts), so its on-screen controls start as a keyboard and mouse."

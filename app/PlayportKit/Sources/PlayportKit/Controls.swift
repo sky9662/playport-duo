@@ -158,6 +158,7 @@ public struct ControlsDefaults: Equatable, Sendable {
     public var lookSpeed = LookSpeed.defaultValue
     public var trackpadSensitivity = 1.0
     public var mouseSensitivity = 1.0
+    public var pointerAcceleration = true
     /// Every game's layout unless it has its own or a compatibility default; nil: the game's
     /// suggestion (its compatibility default, else Gamepad).
     public var startingLayout: OnScreenLayout?
@@ -182,6 +183,7 @@ public struct ControlsDefaults: Equatable, Sendable {
         lookSpeed = LookSpeed.kept(GyroSettings.number(defaults, Self.lookSpeedKey)) ?? LookSpeed.defaultValue
         trackpadSensitivity = PointerSensitivity.kept(GyroSettings.number(defaults, PointerSensitivity.trackpadKey)) ?? 1
         mouseSensitivity = PointerSensitivity.kept(GyroSettings.number(defaults, PointerSensitivity.mouseKey)) ?? 1
+        pointerAcceleration = defaults.object(forKey: PointerSensitivity.accelerationKey) as? Bool ?? true
         startingLayout = defaults.string(forKey: Self.startingLayoutKey).flatMap(OnScreenLayout.init(rawValue:))
             .flatMap { OnScreenLayout.startingChoices.contains($0) ? $0 : nil }
     }
@@ -212,6 +214,7 @@ public struct GameControls: Codable, Equatable, Sendable {
     public var lookSpeed: Double?
     public var trackpadSensitivity: Double?
     public var mouseSensitivity: Double?
+    public var pointerAcceleration: Bool?
     public var layouts: [OnScreenLayout: ControlLayout]
     public var expandedLayout: OnScreenLayout? = nil
     public var expandedLayouts: [OnScreenLayout: ControlLayout] = [:]
@@ -225,7 +228,7 @@ public struct GameControls: Codable, Equatable, Sendable {
         self.controllerMap = controllerMap; self.lookSpeed = lookSpeed; self.layouts = layouts
     }
 
-    enum CodingKeys: String, CodingKey, CaseIterable { case layout, opacity, dpad, rightStick, gyro, controllerMap, lookSpeed, trackpadSensitivity, mouseSensitivity, layouts, expandedLayout, expandedLayouts, expandedDpad, expandedRightStick }
+    enum CodingKeys: String, CodingKey, CaseIterable { case layout, opacity, dpad, rightStick, gyro, controllerMap, lookSpeed, trackpadSensitivity, mouseSensitivity, pointerAcceleration, layouts, expandedLayout, expandedLayouts, expandedDpad, expandedRightStick }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -238,6 +241,7 @@ public struct GameControls: Codable, Equatable, Sendable {
         lookSpeed = try c.decodeIfPresent(Double.self, forKey: .lookSpeed)
         trackpadSensitivity = try c.decodeIfPresent(Double.self, forKey: .trackpadSensitivity)
         mouseSensitivity = try c.decodeIfPresent(Double.self, forKey: .mouseSensitivity)
+        pointerAcceleration = try c.decodeIfPresent(Bool.self, forKey: .pointerAcceleration)
         expandedLayout = try c.decodeIfPresent(OnScreenLayout.self, forKey: .expandedLayout)
         expandedDpad = try c.decodeIfPresent(OnScreenDpad.self, forKey: .expandedDpad)
         expandedRightStick = try c.decodeIfPresent(OnScreenRightStick.self, forKey: .expandedRightStick)
@@ -268,6 +272,7 @@ public struct GameControls: Codable, Equatable, Sendable {
         try c.encodeIfPresent(lookSpeed, forKey: .lookSpeed)
         try c.encodeIfPresent(trackpadSensitivity, forKey: .trackpadSensitivity)
         try c.encodeIfPresent(mouseSensitivity, forKey: .mouseSensitivity)
+        try c.encodeIfPresent(pointerAcceleration, forKey: .pointerAcceleration)
         try c.encodeIfPresent(expandedLayout, forKey: .expandedLayout)
         try c.encodeIfPresent(expandedDpad, forKey: .expandedDpad)
         try c.encodeIfPresent(expandedRightStick, forKey: .expandedRightStick)
@@ -281,7 +286,7 @@ public struct GameControls: Codable, Equatable, Sendable {
 
     public var isEmpty: Bool {
         layout == nil && opacity == nil && dpad == nil && rightStick == nil && (gyro?.isEmpty ?? true) && controllerMap == nil
-            && lookSpeed == nil && trackpadSensitivity == nil && mouseSensitivity == nil && layouts.isEmpty
+            && lookSpeed == nil && trackpadSensitivity == nil && mouseSensitivity == nil && pointerAcceleration == nil && layouts.isEmpty
             && expandedLayout == nil && expandedLayouts.isEmpty && expandedDpad == nil && expandedRightStick == nil
     }
 
@@ -297,6 +302,10 @@ public struct GameControls: Codable, Equatable, Sendable {
 
     public func mouseSensitivity(over defaults: ControlsDefaults) -> Double {
         PointerSensitivity.kept(mouseSensitivity) ?? defaults.mouseSensitivity
+    }
+
+    public func pointerAcceleration(over defaults: ControlsDefaults) -> Bool {
+        pointerAcceleration ?? defaults.pointerAcceleration
     }
 
     /// Merge an editor's current display only. Other display drafts and

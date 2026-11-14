@@ -180,6 +180,27 @@ int main(int argc, char **argv)
         if (create("NotSteam001", &code)) fail("NotSteam001", 0, "-", "answered a name that is no interface");
     }
 
+    /* No-device lifecycle: a game may reject a false Init before it creates a
+     * graphics device. Call through the actual vtable on both ABIs, including
+     * repeated Init after Shutdown; never claim a controller is connected. */
+    {
+        int code;
+        const entry *e = entry_of("SteamController005");
+        void *controller = create("SteamController005", &code);
+        if (!e || !controller) fail("SteamController005", 0, "-", "no controller interface");
+        else {
+            for (int pass = 0; pass < 2; pass++) {
+                if (!(uint8_t)call_slot(controller, 0, 0, 0, 0, e->version, "Init"))
+                    fail(e->version, 0, "Init", "no-device initialization failed");
+                call_slot(controller, 2, 0, 0, 0, e->version, "RunFrame");
+                if ((uint32_t)call_slot(controller, 3, 1, 0, 0, e->version, "GetConnectedControllers"))
+                    fail(e->version, 3, "GetConnectedControllers", "advertised a controller with no provider");
+                if (!(uint8_t)call_slot(controller, 1, 0, 0, 0, e->version, "Shutdown"))
+                    fail(e->version, 1, "Shutdown", "no-device shutdown failed");
+            }
+        }
+    }
+
     if (failures) { printf("%d failures in %u slot calls\n", failures, calls); return 1; }
     printf("ok %u slots in %u versions\n", calls, (unsigned)(sizeof(entries) / sizeof(*entries)));
     return 0;

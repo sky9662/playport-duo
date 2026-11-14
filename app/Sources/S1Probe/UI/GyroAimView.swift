@@ -34,7 +34,7 @@ struct GameControlsOptionRows: View {
 
     var body: some View {
         let own = store.game(titleID)
-        let expanded = horizontalClass == .regular
+        let expanded = SceneDisplay.uiProfile.expandedControls(isRegular: horizontalClass == .regular)
         let inheritance: GameControls = {
             var value = own
             value.expandedLayout = nil; value.expandedDpad = nil; value.expandedRightStick = nil
@@ -47,7 +47,7 @@ struct GameControlsOptionRows: View {
         let suggested = ControlsState.resolve(game: nil, defaults: store.defaults, controllerConnected: false,
                                               compat: entry?.controls).layout
         let compat = suggested == inherited.layout ? nil : suggested
-        PadSectionHeader(text: expanded ? "Controls · Inner display" : "Controls · Outer display").id("controls")
+        PadSectionHeader(text: SceneDisplay.usesDuoLayout ? (expanded ? "Controls · Inner display" : "Controls · Outer display") : "Controls").id("controls")
         if let entry, compat != nil {
             // What the marker means, as Graphics' row says it for launch settings (GameDetailView).
             PadRow(id: "opt:compatControls", title: "\(OptionValue.compatMarker) Set for this game's compatibility",
@@ -55,7 +55,7 @@ struct GameControlsOptionRows: View {
                    subtitleLines: nil, style: .plain, hint: "Info") {}
         }
         choiceRow("opt:layout", "On-screen controls", expanded ? \.expandedLayout : \.layout, all: OnScreenLayout.allCases, inherited: inherited.layout,
-                  compat: compat, name: \.title, detail: expanded ? "Inner display; Default follows the outer layout" : "Outer display; shown while no controller is connected")
+                  compat: compat, name: \.title, detail: SceneDisplay.usesDuoLayout ? (expanded ? "Inner display; Default follows the outer layout" : "Outer display; shown while no controller is connected") : "Shown while no controller is connected")
         // The Gamepad preset's d-pad and right stick: only while the game plays that preset itself
         // (no copy of its own, not another layout), where they change what is drawn.
         let plays = ControlsState.resolve(game: own, defaults: store.defaults, controllerConnected: false, compat: entry?.controls, expanded: expanded)

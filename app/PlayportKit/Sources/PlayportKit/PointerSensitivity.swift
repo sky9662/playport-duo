@@ -4,7 +4,8 @@
 public enum PointerSensitivity {
     public static let trackpadKey = "controls.trackpadSensitivity"
     public static let mouseKey = "controls.mouseSensitivity"
-    public static let steps: [Double] = [0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4]
+    public static let accelerationKey = "controls.pointerAcceleration"
+    public static let steps: [Double] = [0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4]
     public static func kept(_ value: Double?) -> Double? {
         value.flatMap { $0.isFinite && (0.1...4).contains($0) ? $0 : nil }
     }

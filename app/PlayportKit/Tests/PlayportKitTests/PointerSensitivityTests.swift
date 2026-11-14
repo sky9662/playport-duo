@@ -4,6 +4,17 @@ import XCTest
 @testable import PlayportKit
 
 final class PointerSensitivityTests: XCTestCase {
+    func test175PercentIsSharedByPickersAndQuickMenuAndPersists() throws {
+        XCTAssertEqual(PointerSensitivity.step(1.5, by: 1), 1.75)
+        XCTAssertEqual(PointerSensitivity.step(2, by: -1), 1.75)
+        XCTAssertEqual(PointerSensitivity.label(1.75), "175%")
+        var game = GameControls()
+        game.trackpadSensitivity = 1.75
+        game.mouseSensitivity = 1.75
+        let restored = try JSONDecoder().decode(GameControls.self, from: JSONEncoder().encode(game))
+        XCTAssertEqual(restored.trackpadSensitivity(over: ControlsDefaults()), 1.75)
+        XCTAssertEqual(restored.mouseSensitivity(over: ControlsDefaults()), 1.75)
+    }
     func testInGameStepsReach250PercentAndClampOrWrapAtEnds() {
         XCTAssertEqual(PointerSensitivity.step(2, by: 1), 2.5)
         XCTAssertEqual(PointerSensitivity.step(3, by: -1), 2.5)

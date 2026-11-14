@@ -57,7 +57,7 @@ final class TouchControlsTests: XCTestCase {
         var t = TouchControls(targets: [left])
         XCTAssertTrue(t.began(1, at: p(200, 300), time: 0))
         XCTAssertEqual(t.output.pad.lx, 0)
-        t.moved(1, at: p(229, 300), time: 0.05)   // half the radius (58) to the right
+        t.moved(1, at: p(226, 300), time: 0.05)   // half the fixed movement travel (52) to the right
         XCTAssertEqual(t.output.pad.lx, 0.5, accuracy: 0.001)
         XCTAssertEqual(t.output.pad.ly, 0)
         t.moved(1, at: p(200, 200), time: 0.1)     // far up: clamped to the unit circle, +y up

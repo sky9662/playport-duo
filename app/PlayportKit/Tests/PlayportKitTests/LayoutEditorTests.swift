@@ -149,8 +149,8 @@ final class LayoutEditorTests: XCTestCase {
         profiles.rename(0, to: "  Keyboard  ")
         XCTAssertEqual(profiles.name(0), "Keyboard")
         XCTAssertNil(profiles[1]); XCTAssertNil(profiles[2])
-        profiles.save(3, preset: .keyboardMouse, layout: ControlLayout(controls: [space]))
-        XCTAssertNil(profiles[3])
+        profiles.save(ControlLayoutProfiles.count, preset: .keyboardMouse, layout: ControlLayout(controls: [space]))
+        XCTAssertNil(profiles[ControlLayoutProfiles.count])
         let roundTrip = try JSONDecoder().decode(ControlLayoutProfiles.self, from: JSONEncoder().encode(profiles))
         XCTAssertEqual(roundTrip, profiles)
         var a = LayoutEditor(preset: .gamepad, width: 800, height: 400)
@@ -164,7 +164,71 @@ final class LayoutEditorTests: XCTestCase {
         b.apply(try XCTUnwrap(profiles[0]))
         XCTAssertEqual(b.layout, ControlLayout(controls: [space]), "another game's copy uses the unchanged shared template")
     }
+
+    func testGroupShrinkingGrowingAndUndoOnFourByThreeCanvas() throws {
+        var second = space; second.id = "second"; second.x = 140
+        var e = LayoutEditor(preset: .keyboardMouse,
+            copies: [.keyboardMouse: ControlLayout(controls: [space, second])],
+            width: 800, height: 600, insets: ControlInsets(top: 16, left: 24, bottom: 20, right: 24))
+        e.select("b"); e.toggleSelection("second")
+        let original = e.layout
+        e.resize("second", by: -1)
+        XCTAssertLessThan(try XCTUnwrap(e.frame(of: "b")).width, 48)
+        e.undo(); XCTAssertEqual(e.layout, original)
+        e.pinch("b", scale: 100)
+        e.endGesture()
+        let a = try XCTUnwrap(e.frame(of: "b")), b = try XCTUnwrap(e.frame(of: "second"))
+        XCTAssertGreaterThan(a.width, 48)
+        XCTAssertEqual(a.width, b.width, accuracy: 0.001)
+        XCTAssertGreaterThanOrEqual(a.x, 24)
+        XCTAssertLessThanOrEqual(b.x + b.width, 776.001)
+        XCTAssertGreaterThanOrEqual(a.y, 16)
+        XCTAssertLessThanOrEqual(a.y + a.height, 580.001)
+        e.undo(); XCTAssertEqual(e.layout, original)
+        e.pinch("second", scale: 0.001)
+        e.endGesture()
+        XCTAssertEqual(try XCTUnwrap(e.frame(of: "b")).width, LayoutEditor.minimumSide, accuracy: 0.001)
+        XCTAssertEqual(e.selectedIDs, ["b", "second"])
+        e.undo(); XCTAssertEqual(e.layout, original)
+    }
     // MARK: the game's own copy
+
+    func testFiveProfilesExtendExistingSlotsWithoutChangingNamesVariantsOrFutureFields() throws {
+        var original = ControlLayoutProfiles()
+        for slot in 0..<3 {
+            original.save(slot, preset: .keyboardMouse, layout: ControlLayout(controls: [space]))
+            original.rename(slot, to: "Existing \(slot)")
+        }
+        var raw = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        raw["future"] = ["version": 9]
+        var slots = try XCTUnwrap(raw["slots"] as? [String: [String: Any]])
+        slots["0"]?["futureProfile"] = "kept"
+        var outer = try XCTUnwrap(slots["0"]?["outer"] as? [String: Any])
+        var layout = try XCTUnwrap(outer["layout"] as? [String: Any])
+        var controls = try XCTUnwrap(layout["controls"] as? [[String: Any]])
+        controls[0]["futureControl"] = "kept"
+        layout["controls"] = controls; outer["layout"] = layout; slots["0"]?["outer"] = outer
+        raw["slots"] = slots
+        let data = try JSONSerialization.data(withJSONObject: raw)
+        var expanded = try JSONDecoder().decode(ControlLayoutProfiles.self, from: data)
+        XCTAssertEqual(ControlLayoutProfiles.count, 5)
+        for slot in 3..<5 {
+            expanded.save(slot, preset: .gamepad, layout: .gamepad())
+            XCTAssertNotNil(expanded[slot]?.outer)
+            XCTAssertNotNil(expanded[slot]?.inner)
+        }
+        for slot in 0..<3 { XCTAssertEqual(expanded[slot], original[slot]) }
+        let saved = try expanded.json(preserving: data)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: saved) as? [String: Any])
+        XCTAssertEqual((object["future"] as? [String: Int])?["version"], 9)
+        let savedSlots = try XCTUnwrap(object["slots"] as? [String: [String: Any]])
+        XCTAssertEqual(savedSlots["0"]?["futureProfile"] as? String, "kept")
+        let savedOuter = try XCTUnwrap(savedSlots["0"]?["outer"] as? [String: Any])
+        let savedLayout = try XCTUnwrap(savedOuter["layout"] as? [String: Any])
+        let savedControls = try XCTUnwrap(savedLayout["controls"] as? [[String: Any]])
+        XCTAssertEqual(savedControls[0]["futureControl"] as? String, "kept")
+        XCTAssertEqual(try JSONDecoder().decode(ControlLayoutProfiles.self, from: saved), expanded)
+    }
 
     func testAGamesEditedCopyIsDrawnForItsPresetAndRoundTrips() throws {
         var mine = ControlLayout.keyboardMouse()

@@ -86,7 +86,7 @@ final class ControlsStore: ObservableObject {
     }
 
     private func storeLayoutProfiles(_ profiles: ControlLayoutProfiles) {
-        guard let data = try? JSONEncoder().encode(profiles) else { return }
+        guard let data = try? profiles.json(preserving: UserDefaults.standard.data(forKey: ControlLayoutProfiles.storageKey)) else { return }
         layoutProfiles = profiles
         UserDefaults.standard.set(data, forKey: ControlLayoutProfiles.storageKey)
     }

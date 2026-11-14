@@ -33,7 +33,7 @@ public enum QuickMenuItem: String, CaseIterable, Sendable {
 /// The Controls panel's rows.
 public enum QuickMenuControlsRow: String, CaseIterable, Sendable {
     case layout, dpad, rightStick, opacity
-    case trackpadSensitivity, mouseSensitivity
+    case trackpadSensitivity, mouseSensitivity, pointerAcceleration
     /// The game's gyro aim output (Off, Mouse, Right stick) and its sensitivity (GyroOptions.swift).
     case gyro, gyroSensitivity
     /// The controller map's mode (Pad, Keys & mouse, Custom): only while a controller is connected.
@@ -59,6 +59,7 @@ public enum QuickMenuControlsRow: String, CaseIterable, Sendable {
         case .opacity: "Opacity"
         case .trackpadSensitivity: "Touch trackpad"
         case .mouseSensitivity: "Mouse sensitivity"
+        case .pointerAcceleration: "Touch acceleration"
         case .gyro: "Gyro aim"
         case .gyroSensitivity: "Sensitivity"
         case .controllerMap: "Controller"

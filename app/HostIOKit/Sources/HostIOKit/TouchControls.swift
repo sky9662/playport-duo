@@ -189,7 +189,8 @@ public enum TouchRoute: Equatable, Sendable {
 ///   on for the first half of each `repeatInterval`). Two fingers on one
 ///   button hold it until the last lifts.
 /// - A stick starts where the thumb lands: the deflection is the finger's
-///   distance from there over the stick's radius, clamped to the unit circle
+///   distance from there over a fixed 52 pt travel for movement (the right
+///   stick uses its visual radius), clamped to the unit circle
 ///   (+y up, as XInput has it). A floating stick starts anywhere in its zone
 ///   (the Gamepad layout's lower corners, one for each stick); a control that
 ///   overlaps a zone is hit first. A second touch within `doubleTapWindow` of a short tap on the same
@@ -256,6 +257,9 @@ public struct TouchControls: Sendable {
     public var keyStickReleaseAt = 0.4
     /// A trackpad's mouse counts for each point a finger moves.
     public var trackpadScale = 2.0
+    /// Speed-dependent touch trackpad/look gain. Off keeps the linear mapping.
+    /// The app resolves the saved setting (default On) before accepting touches.
+    public var pointerAcceleration = false
     /// The points a scroll drag goes for one wheel notch.
     public var scrollStep = 20.0
     /// A trackpad tap: up within this many seconds...
@@ -276,6 +280,7 @@ public struct TouchControls: Sendable {
         var origin: TouchPoint
         var at: TouchPoint
         var began: Double
+        var motionTime: Double = 0
         var thumb = false
         /// A key stick's directions held now (0 up, 1 down, 2 left, 3 right).
         var keys: Set<Int> = []
@@ -340,6 +345,7 @@ public struct TouchControls: Sendable {
         now = max(now, t)
         guard fingers[touch] == nil, let i = target(at: p) else { return false }
         var f = Finger(target: i, origin: p, at: p, began: t)
+        f.motionTime = t
         let id = targets[i].id
         switch targets[i].kind {
         case .button(_, .toggle):
@@ -387,10 +393,13 @@ public struct TouchControls: Sendable {
         now = max(now, t)
         guard var f = fingers[touch] else { return }
         let from = f.at
+        let dx = p.x - from.x, dy = p.y - from.y
+        let gain = pointerAcceleration ? TouchAcceleration.gain(dx: dx, dy: dy, elapsed: t - f.motionTime) : 1
+        f.motionTime = max(f.motionTime, t)
         f.at = p
         switch targets[f.target].kind {
         case .look:
-            move(dx: (p.x - from.x) * lookScale, dy: (p.y - from.y) * lookScale)
+            move(dx: dx * lookScale * gain, dy: dy * lookScale * gain)
         case .keyStick:
             // Each axis apart, +y up: up, down, left, right.
             let d = deflection(f)
@@ -407,7 +416,7 @@ public struct TouchControls: Sendable {
                     events.append(.wheel(Int(notches)))
                 }
             } else if trackpad {
-                move(dx: (p.x - from.x) * trackpadScale, dy: (p.y - from.y) * trackpadScale)
+                move(dx: dx * trackpadScale * gain, dy: dy * trackpadScale * gain)
             } else {
                 place(p, in: view)
             }
@@ -435,7 +444,7 @@ public struct TouchControls: Sendable {
         order.removeAll { $0 == touch }
         let target = targets[f.target]
         if case .stick = target.kind, !f.thumb, t - f.began <= doubleTapWindow,
-           Self.distance(f.origin, f.at) < target.frame.width / 4 {
+           Self.distance(f.origin, f.at) < stickRadius(target) / 2 {
             lastTap[target.id] = t
         }
         if case .pointer = target.kind, f.points {
@@ -578,8 +587,17 @@ public struct TouchControls: Sendable {
         }
     }
 
+    /// Movement sticks keep the default 104 pt stick's travel, independently
+    /// of the glyph or landing zone. Right-stick look retains its existing scale.
+    private func stickRadius(_ target: TouchTarget) -> Double {
+        switch target.kind {
+        case .stick(.leftStick, _), .keyStick: return 52
+        default: return max(1, target.frame.width / 2)
+        }
+    }
+
     private func deflection(_ f: Finger) -> (x: Double, y: Double) {
-        let r = max(1, targets[f.target].frame.width / 2)
+        let r = stickRadius(targets[f.target])
         var x = (f.at.x - f.origin.x) / r, y = (f.origin.y - f.at.y) / r
         guard x.isFinite, y.isFinite else { return (0, 0) }
         let len = (x * x + y * y).squareRoot()

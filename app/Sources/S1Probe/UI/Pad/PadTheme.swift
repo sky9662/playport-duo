@@ -141,7 +141,7 @@ final class WindowInsets: ObservableObject {
     func read() -> String {
         let window = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows).first { $0.isKeyWindow }
-        let i = window?.gameSafeInsets ?? .zero
+        let i = (SceneDisplay.usesDuoLayout ? window?.gameSafeInsets : window?.safeAreaInsets) ?? .zero
         let e = EdgeInsets(top: i.top, leading: i.left, bottom: i.bottom, trailing: i.right)
         if e != insets { insets = e }
         return "safe area top=\(Int(i.top)) left=\(Int(i.left)) bottom=\(Int(i.bottom)) right=\(Int(i.right))"

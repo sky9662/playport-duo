@@ -8,7 +8,7 @@
  * leaves Wine with no foreground window (fg 0) until something activates one
  * again; with fg 0 the server drops every key and Winios has no client area to
  * map a touch to. The window that lost focus is preferred; when it is gone,
- * hidden, disabled (behind a modal dialog) or minimized, the topmost window of
+ * hidden or disabled (behind a modal dialog), the topmost window of
  * its process that can be activated, then the topmost of any process.
  * Plain C11 so tests/focus_test.c runs it on the Linux host.
  */
@@ -40,6 +40,16 @@ int host_focus_pick(const host_focus_window *wins, int n, const void *saved, uns
     if (saved_pid)
         for (i = 0; i < n; i++)
             if (wins[i].pid == saved_pid && can_activate(&wins[i])) return i;
+    /* Only the saved game's window may be restored from minimization. An
+     * enabled modal above it was preferred by the process pass. Winios must
+     * restore this window on its owner thread before activating it. */
+    if (saved && saved_pid)
+        for (i = 0; i < n; i++) {
+            host_focus_window w = wins[i];
+            if (w.hwnd != saved || w.pid != saved_pid || !(w.style & WS_MINIMIZE)) continue;
+            w.style &= ~WS_MINIMIZE;
+            if (can_activate(&w)) return i;
+        }
     for (i = 0; i < n; i++)
         if (can_activate(&wins[i])) return i;
     return -1;

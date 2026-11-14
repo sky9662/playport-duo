@@ -51,7 +51,11 @@ struct AppShell: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !nav.settings && !nav.setup && !nav.signIn && !nav.onGamePage { TopBar(installs: model.installs).openingChrome() }
+            if !nav.settings && !nav.setup && !nav.signIn && !nav.onGamePage {
+                TopBar(installs: model.installs)
+                    .padding(.horizontal, SceneDisplay.usesDuoLayout ? 24 : 0)
+                    .openingChrome()
+            }
             content.frame(maxWidth: .infinity, maxHeight: .infinity)
             if !panelUp {
                 PadFooter(hints: hints).overlay(alignment: .leading) {
@@ -108,7 +112,9 @@ struct AppShell: View {
             BlackScreenView()
             #endif
         }
-        .background(WindowGeometryObserver().allowsHitTesting(false))
+        .background {
+            if SceneDisplay.usesDuoLayout { WindowGeometryObserver().allowsHitTesting(false) }
+        }
         .padFocusRoot()
         .onReceive(PadRouter.shared.presses) { press($0) }
         // Choosing a pairing file (the checklist's step on iOS 26, Setup check's import), or a
@@ -194,7 +200,7 @@ struct AppShell: View {
             SetupView()
         } else {
             switch nav.page {
-            case .home: HomeView(installs: model.installs)
+            case .home: HomeView(installs: model.installs).padding(.horizontal, SceneDisplay.usesDuoLayout ? 24 : 0)
             case .library: LibraryView(installs: model.installs)
             case .downloads: DownloadsPage(installs: model.installs)
             }

@@ -1,0 +1,110 @@
+From d0cb95a85a7e0de031720d1483f6098bfc5f3f0d Mon Sep 17 00:00:00 2001
+From: The Playport authors <dev@playport.dev>
+Date: Fri, 13 Nov 2026 11:32:17 +0800
+Subject: [PATCH] Winios: restore the saved minimized game before returning
+ focus
+
+Only the saved game window is eligible for minimization recovery. Queue
+SW_RESTORE on its owner thread, then request foreground activation after
+WS_MINIMIZE clears. Keep the bounded input wait, child focus recovery and
+key releases. Hidden/disabled/destroyed windows are never forced active.
+No fullscreen or unrelated-window restoration is performed.
+
+Class: host-app
+Evidence: app/tests/focus_test.c; native SDK build; DOOM device gate pending
+Offered-upstream: no; host focus lifecycle integration
+---
+ app/Madeira/Winios/Winios.m | 37 +++++++++++++++++++++++++++++++++----
+ 1 file changed, 33 insertions(+), 4 deletions(-)
+
+diff --git a/app/Madeira/Winios/Winios.m b/app/Madeira/Winios/Winios.m
+index 32ada97..bb83e48 100644
+--- a/app/Madeira/Winios/Winios.m
++++ b/app/Madeira/Winios/Winios.m
+@@ -572,6 +572,7 @@ unsigned int winios_input_pending(void) {
+ typedef struct { int left, top, right, bottom; } winios_wrect;   /* Wine RECT: LONG is 32-bit on LP64 */
+ typedef struct { int x, y; } winios_wpoint;
+ extern HWND NtUserGetForegroundWindow(void);
++extern BOOL NtUserShowWindowAsync(HWND hwnd, int cmd);
+ extern HWND get_desktop_window(void);
+ extern BOOL get_client_rect(HWND hwnd, winios_wrect *rect, UINT dpi);
+ extern BOOL client_to_screen(HWND hwnd, winios_wpoint *pt);
+@@ -599,13 +600,14 @@ static HWND g_focus_saved;          /* the window the last focus loss deactivate
+ static unsigned int g_focus_pid;    /* its Wine process */
+ static HWND g_focus_child;          /* its focused child at the loss, given back once it is active */
+ static double g_child_until;        /* after a focus back, how long g_focus_child waits for that */
++static HWND g_restore_show_pending; /* owner-thread restore before foreground activation */
+ static HWND g_restore_target;       /* the window a restore activates */
+ static double g_restore_since;      /* a restore not seen to land yet: input waits */
+ static double g_restore_retry_at;   /* after a restore that did not land, input-driven ones wait until */
+ static double g_focus_wait_since;   /* when a focus loss began waiting for its window's thread */
+ 
+ static int winios_fg_none(HWND fg) {
+-    return !fg || fg == get_desktop_window();
++    return !fg || fg == get_desktop_window() || (get_window_long(fg, -16) & 0x20000000u /* WS_MINIMIZE */);
+ }
+ 
+ /* The window to give the foreground back to (hio_focus.c), or NULL. */
+@@ -637,7 +639,23 @@ static HWND winios_focus_target(HWND saved, unsigned int saved_pid) {
+  * to that thread, and input waits in winios_focus_ready until it has. */
+ static int winios_focus_restore(HWND target, const char *why) {
+     HWND fg = NtUserGetForegroundWindow();
+-    int ok = set_foreground_window(target, 0, 1);
++    unsigned int style = get_window_long(target, -16);
++    int ok;
++    if (!is_window(target) || !(style & 0x10000000u /* WS_VISIBLE */) ||
++        (style & 0x08000000u /* WS_DISABLED */) ||
++        (get_window_long(target, -20) & 0x08000000u /* WS_EX_NOACTIVATE */)) return 0;
++    if (style & 0x20000000u /* WS_MINIMIZE */) {
++        /* Never synchronously send WM_WINE_SHOWWINDOW across guest threads:
++         * the owner may be waiting for the current drain to return. Set the
++         * pending state before the call, since the owner may re-enter us. */
++        pthread_mutex_lock(&g_focus_lock);
++        g_restore_show_pending = target;
++        pthread_mutex_unlock(&g_focus_lock);
++        ok = NtUserShowWindowAsync(target, 9 /* SW_RESTORE */);
++        fprintf(stderr, "[winios] focus restore (%s): restore minimized target=%p queued=%d\n", why, target, ok);
++        return ok;
++    }
++    ok = set_foreground_window(target, 0, 1);
+     HWND now = NtUserGetForegroundWindow();
+     fprintf(stderr, "[winios] focus restore (%s): target=%p fg=%p -> %p ok=%d\n", why, target, fg, now, ok);
+     return ok;
+@@ -735,13 +753,21 @@ static int winios_focus_ready(const winios_input_event_t *e) {
+     if (pthread_mutex_trylock(&g_focus_lock)) return 0;   /* another drain (or this one, re-entered) is at it */
+     now = CACurrentMediaTime();
+     if (g_restore_since) {
+-        if (!winios_fg_none(fg)) {
++        /* Activate only after the owner has actually removed WS_MINIMIZE.
++         * A vanished/disabled target is never forced through a modal. */
++        if (g_restore_show_pending && is_window(g_restore_show_pending) &&
++            !(get_window_long(g_restore_show_pending, -16) & 0x20000000u)) {
++            target = g_restore_show_pending;
++            g_restore_show_pending = NULL;
++            ready = 0;
++        } else if (!g_restore_show_pending && !winios_fg_none(fg)) {
+             fprintf(stderr, "[winios] focus restored: fg=%p after %.3f s\n", fg, now - g_restore_since);
+             g_restore_since = 0;
+         } else if (now - g_restore_since >= 0.5) {
+             fprintf(stderr, "[winios] focus restore to %p NOT done in 0.5 s; input goes on (fg=%p)\n", g_restore_target, fg);
+             g_restore_since = 0;
+             g_restore_retry_at = now + 2.0;
++            g_restore_show_pending = NULL;
+         } else {
+             ready = 0;
+         }
+@@ -771,7 +797,10 @@ static void winios_drain_focus(int active) {
+     waited = g_focus_wait_since ? CACurrentMediaTime() - g_focus_wait_since : 0;
+     g_focus_wait_since = 0;
+     g_app_away = !active;
+-    if (!active) g_restore_since = g_child_until = 0;
++    if (!active) {
++        g_restore_since = g_child_until = 0;
++        g_restore_show_pending = NULL;
++    }
+     pthread_mutex_unlock(&g_focus_lock);
+     if (!active) {
+         if (winios_fg_none(fg)) {
+-- 
+2.56.0
+

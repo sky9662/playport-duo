@@ -14,7 +14,9 @@ The OpenGL 4.1 compatibility row displays Default · On when the game's profile 
 
 Settings > Controls and each game's options offer independent touch trackpad and mouse sensitivity from 10% to 400%. Mouse sensitivity also controls relative touch look. Absolute tapping, scrolling, controller look and gyro remain separate. A game's Default follows Settings; resetting Settings restores 100%.
 
-The running game's menu (three-finger tap, or hold a controller's Home button) also exposes both sensitivity steppers under Controls, including 250%. Changes are saved for that game and take effect when resuming. These are constant multipliers; no speed-dependent acceleration is applied.
+The running game's menu (three-finger tap, or hold a controller's Home button) also exposes both sensitivity steppers under Controls, including 250%. Changes are saved for that game and take effect when resuming.
+
+Touch acceleration is On by default in Settings > Controls, each game's controls and the running game's Controls menu. It applies a continuous speed curve to touch trackpad and touch look before sensitivity: 0.5× at up to 60 points/second, rising smoothly to 1.5× at 600 points/second. Slow strokes are finer and fast strokes travel farther; Off restores the original constant multiplier. Each game can override Settings or follow Default. This adds no waiting period, prediction, inertia or movement threshold. It changes the response to delivered coordinates and does not recover movement the touch system has not delivered. Absolute pointing, scrolling, physical mice, controllers and gyro keep their existing behavior.
 
 The layout editor offers Multi-select: tap movable controls to include or exclude them, then drag a selected control or pinch the group's box to move or scale them together. Select all excludes full-screen pointer/look surfaces. Group moves keep spacing at the safe-area boundary, and a completed gesture is one undo step. Single-selection still exposes individual labels and bindings.
 

@@ -67,7 +67,7 @@ int main(void)
         CHECK(host_focus_pick(w, 3, GAME, game_pid) == 1);
     }
 
-    /* Hidden, minimized, WS_EX_NOACTIVATE and child-styled windows are passed over. */
+    /* Only the saved minimized game can be restored; unrelated minimized windows stay put. */
     {
         host_focus_window w[] = {
             { HIDDEN, game_pid, WS_POPUP, 0 },
@@ -76,8 +76,23 @@ int main(void)
             { GAME, game_pid, WS_VISIBLE | WS_CAPTION | WS_MINIMIZE, 0 },
             { LAUNCHER, launcher_pid, WS_VISIBLE | WS_CAPTION, 0 },
         };
-        CHECK(host_focus_pick(w, 5, GAME, game_pid) == 4);   /* none of the game's: any process's */
-        CHECK(host_focus_pick(w, 4, GAME, game_pid) == -1);  /* none at all */
+        CHECK(host_focus_pick(w, 5, GAME, game_pid) == 3);
+        CHECK(host_focus_pick(w, 4, GAME, game_pid) == 3);
+        CHECK(host_focus_pick(w, 5, NULL, game_pid) == 4);
+        CHECK(host_focus_pick(w, 4, NULL, game_pid) == -1);
+        CHECK(host_focus_pick(w, 4, GAME, launcher_pid) == -1);
+        w[3].style |= WS_DISABLED;
+        CHECK(host_focus_pick(w, 5, GAME, game_pid) == 4);
+        w[3].style &= ~(WS_DISABLED | WS_VISIBLE);
+        CHECK(host_focus_pick(w, 4, GAME, game_pid) == -1);
+    }
+    /* A game-owned modal wins over its minimized owner. */
+    {
+        host_focus_window w[] = {
+            { GAME, game_pid, WS_VISIBLE | WS_MINIMIZE | WS_CAPTION, 0 },
+            { DIALOG, game_pid, WS_VISIBLE | WS_POPUP, 0 },
+        };
+        CHECK(host_focus_pick(w, 2, GAME, game_pid) == 1);
     }
 
     /* The saved window is gone (not listed): the topmost of its process. */

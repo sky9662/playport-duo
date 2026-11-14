@@ -86,6 +86,7 @@ final class LayoutEditorSession: ObservableObject {
         let size = Self.windowSize, insets = Self.insets
         editor = LayoutEditor(game: draftGame, state: state, width: Double(size.width),
                               height: Double(size.height), insets: insets, expandedControls: editingExpanded)
+        rememberDisplaySize()
         pad = LayoutEditorPad()
         opacity = state.opacity
         openedOpacity = state.opacity
@@ -176,6 +177,8 @@ final class LayoutEditorSession: ObservableObject {
             switchDisplay(to: expanded)
         }
         let i = Self.insets
+        let area = i.area(width: Double(size.width), height: Double(size.height))
+        rememberDisplaySize(ControlLayoutSize(width: area.width, height: area.height))
         guard Double(size.width) != editor.width || Double(size.height) != editor.height || i != editor.insets,
               size.width > 0, size.height > 0 else { return }
         editor.setView(width: Double(size.width), height: Double(size.height), insets: i)
@@ -220,6 +223,59 @@ final class LayoutEditorSession: ObservableObject {
             let value = cached.saved(into: editorBases[expanded] ?? draftGame)
             draftGame.copyDisplayLayout(from: value, expanded: expanded)
         }
+    }
+
+    private func rememberedDisplaySize(_ expanded: Bool) -> ControlLayoutSize? {
+        guard let data = UserDefaults.standard.data(forKey: "controls.copyCanvas." + (expanded ? "inner" : "outer")),
+              let size = try? JSONDecoder().decode(ControlLayoutSize.self, from: data), size.isValid else { return nil }
+        return size
+    }
+
+    /// Observe the physical scene, never the manually selected preview's label.
+    private func rememberDisplaySize(_ size: ControlLayoutSize? = nil) {
+        let value = size ?? editor.canvasSize
+        guard SceneDisplay.usesDuoLayout, value.isValid,
+              let data = try? JSONEncoder().encode(value) else { return }
+        let key = "controls.copyCanvas." + (SceneDisplay.usesSideControls ? "inner" : "outer")
+        if UserDefaults.standard.data(forKey: key) != data { UserDefaults.standard.set(data, forKey: key) }
+    }
+
+    private func displayVariant(_ expanded: Bool) -> ControlLayoutProfiles.Variant {
+        let cached = expanded == editingExpanded ? editor : displayEditors[expanded]
+        var variant: ControlLayoutProfiles.Variant
+        if let cached {
+            variant = .init(preset: cached.preset, layout: cached.layout)
+        } else {
+            let state = draftState(expanded: expanded)
+            let preset = state.layout == .off ? editor.preset : state.layout
+            let builtIn = preset.layout(dpad: state.dpad, rightStick: state.rightStick) ?? editor.layout
+            variant = .init(preset: preset, layout: state.edited ?? (expanded ? builtIn.sideReachLayout() : builtIn))
+        }
+        if variant.layout.referenceSize == nil {
+            variant.layout.referenceSize = rememberedDisplaySize(expanded)
+        }
+        return variant
+    }
+
+    func chooseDisplayCopy() {
+        guard isUp, SceneDisplay.usesDuoLayout else { return }
+        editor.endGesture()
+        let target = editingExpanded
+        let source = displayVariant(!target)
+        let from = target ? "Outer" : "Inner", to = target ? "Inner" : "Outer"
+        let sizing = source.layout.referenceSize == nil
+            ? "Source screen size is unknown. This copy keeps the original button sizes. Open the editor on the source screen once to enable proportional scaling."
+            : "Button sizes, spacing and stick zones scale uniformly to fit this canvas."
+        PadModal.shared.picker(title: "Copy \(from) to \(to)?", context: opened?.title,
+            note: sizing + " Replaces the current layout only. The source stays independent. Undo restores the target; Done saves game edits. Save both layouts to a Profile to update its template.",
+            options: [PadOption(id: "cancel", label: "Cancel"),
+                      PadOption(id: "copy", label: source.layout.referenceSize == nil ? "Copy at original size" : "Copy and scale")],
+            selected: "cancel") { action in
+                let session = LayoutEditorSession.shared
+                guard action == "copy", session.isUp, session.editingExpanded == target else { return }
+                session.editor.copyDisplayLayout(preset: source.preset, layout: source.layout)
+                session.multiSelect = false
+            }
     }
 
     /// A tap on the canvas: the control under it, or none; the canvas has the controller then.
@@ -321,15 +377,7 @@ final class LayoutEditorSession: ObservableObject {
     private func saveProfile(_ slot: Int) {
         editor.endGesture()
         flushAllEditors()
-        func variant(expanded: Bool) -> ControlLayoutProfiles.Variant {
-            if expanded == editingExpanded { return .init(preset: editor.preset, layout: editor.layout) }
-            let state = draftState(expanded: expanded)
-            let preset = state.layout == .off ? editor.preset : state.layout
-            let builtIn = preset.layout(dpad: state.dpad, rightStick: state.rightStick) ?? editor.layout
-            let layout = state.edited ?? (expanded ? builtIn.sideReachLayout() : builtIn)
-            return .init(preset: preset, layout: layout)
-        }
-        ControlsStore.shared.saveLayoutProfile(slot, outer: variant(expanded: false), inner: variant(expanded: true))
+        ControlsStore.shared.saveLayoutProfile(slot, outer: displayVariant(false), inner: displayVariant(true))
     }
 
     private func applyProfile(_ profile: ControlLayoutProfiles.Profile) {
@@ -375,6 +423,16 @@ final class LayoutEditorSession: ObservableObject {
     func resize(by steps: Int) {
         guard let id = editor.selection else { return }
         editor.resize(id, by: steps)
+    }
+
+    func resizeStickZone(horizontally: Bool, by steps: Int) {
+        guard let id = editor.selection else { return }
+        editor.resizeStickZone(id, horizontally: horizontally, by: steps)
+    }
+
+    func useLowerLeftStickZone() {
+        guard let id = editor.selection else { return }
+        editor.useLowerLeftStickZone(id)
     }
 
     func setBehaviour(_ b: TouchBehaviour) {
@@ -454,13 +512,29 @@ struct LayoutEditorView: View {
             .ignoresSafeArea()
             bar
                 .frame(maxWidth: .infinity, alignment: .top)
+                .padding(.leading, SceneDisplay.usesDuoLayout ? lead : 0)
+                .padding(.trailing, SceneDisplay.usesDuoLayout ? trail : 0)
                 .padding(.top, max(8, safe.insets.top))
             if let id = editor.selection, let d = editor.details(id) {
                 // On the half of the screen the control is not on.
                 let left = (editor.frame(of: id).map { $0.x + $0.width / 2 } ?? 0) >= editor.width / 2
                 Group {
-                    if editor.selectedIDs.count > 1 { groupInspector }
-                    else { inspector(d) }
+                    if SceneDisplay.usesDuoLayout {
+                        ScrollView(.vertical, showsIndicators: true) {
+                            Group {
+                                if editor.selectedIDs.count > 1 { groupInspector }
+                                else { inspector(d) }
+                            }
+                        }
+                            .frame(width: inspectorWidth,
+                                   height: min(editor.selectedIDs.count > 1 ? 200 : Double(220 + d.slots.count * 42),
+                                               max(80, editor.height - max(54, Double(safe.insets.top) + 46) - 70 - Double(safe.insets.bottom))))
+                    } else {
+                        Group {
+                            if editor.selectedIDs.count > 1 { groupInspector }
+                            else { inspector(d) }
+                        }
+                    }
                 }
                     .padding(.top, max(54, safe.insets.top + 46))
                     .padding(.leading, left ? lead : 0).padding(.trailing, left ? 0 : trail)
@@ -469,7 +543,7 @@ struct LayoutEditorView: View {
             VStack {
                 Spacer()
                 HStack(alignment: .bottom, spacing: 12) {
-                    Text((session.editingExpanded ? "Inner layout" : "Outer layout") + " · "
+                    Text((SceneDisplay.usesDuoLayout ? (session.editingExpanded ? "Inner layout" : "Outer layout") + " · " : "")
                          + (session.multiSelect ? "Tap controls to add or remove · drag or pinch the group" : "Drag to move · pinch to resize · preview on the current screen"))
                         .font(.system(size: 11.5)).foregroundStyle(PP.soft).lineLimit(1).minimumScaleFactor(0.8)
                         .padding(.horizontal, 14).padding(.vertical, 7)
@@ -492,6 +566,10 @@ struct LayoutEditorView: View {
 
     // MARK: the bar
 
+    private var inspectorWidth: CGFloat {
+        SceneDisplay.usesDuoLayout ? min(262, max(0, CGFloat(session.editor.width) - safe.side(44, safe.insets.leading) - safe.side(44, safe.insets.trailing))) : 262
+    }
+
     private var bar: some View {
         let e = session.editor
         return ViewThatFits(in: .horizontal) {
@@ -510,8 +588,13 @@ struct LayoutEditorView: View {
             }
             barItem("edit:preset", e.preset.title + " ▾", hint: "Start from") { session.choosePreset() }
             barItem("edit:profiles", "Profiles ▾", hint: "Profiles") { session.chooseProfile() }
-            barItem("edit:display", session.editingExpanded ? "Editing: Inner" : "Editing: Outer", hint: "Switch display") {
-                session.switchDisplay(to: !session.editingExpanded)
+            if SceneDisplay.usesDuoLayout {
+                barItem("edit:display", session.editingExpanded ? "Editing: Inner" : "Editing: Outer", hint: "Switch display") {
+                    session.switchDisplay(to: !session.editingExpanded)
+                }
+                barItem("edit:copyDisplay", session.editingExpanded ? "Copy from Outer…" : "Copy from Inner…", hint: "Copy other display") {
+                    session.chooseDisplayCopy()
+                }
             }
             barItem("edit:opacity", "Opacity " + ControlsOpacity.label(session.opacity), hint: "Change",
                     adjust: { session.stepOpacity(by: $0) }) { session.stepOpacity(by: 1, wrapping: true) }
@@ -534,8 +617,12 @@ struct LayoutEditorView: View {
             Text("Drag a selected control to move the group. Pinch or use Size to resize together.")
                 .font(.system(size: 12)).foregroundStyle(PP.muted)
             row("edit:groupSize", "Size", value: "‹  Group  ›", hint: "Bigger", adjust: { session.resize(by: $0) }) { session.resize(by: 1) }
+            HStack(spacing: 8) {
+                button("edit:groupSmaller", "− Smaller") { session.resize(by: -1) }
+                button("edit:groupLarger", "+ Larger") { session.resize(by: 1) }
+            }
         }
-        .padding(14).frame(width: 262, alignment: .leading)
+        .padding(14).frame(width: inspectorWidth, alignment: .leading)
         .background(PP.surface.opacity(0.96), in: RoundedRectangle(cornerRadius: 18))
     }
 
@@ -576,6 +663,9 @@ struct LayoutEditorView: View {
                     session.resize(by: 1)
                 }
             }
+            if session.editor.layout.control(d.id)?.kind == .stick {
+                stickZoneInspector(d.id)
+            }
             if let b = d.behaviour { behaviour(b) }
             HStack(spacing: 6) {
                 if d.duplicable { button("edit:duplicate", "Duplicate") { session.duplicate() } }
@@ -583,11 +673,31 @@ struct LayoutEditorView: View {
             }
         }
         .padding(14)
-        .frame(width: 262, alignment: .leading)
+        .frame(width: inspectorWidth, alignment: .leading)
         .background(PP.surface.opacity(0.96), in: RoundedRectangle(cornerRadius: 18))
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(PP.line, lineWidth: 1))
         .shadow(color: .black.opacity(0.45), radius: 20, y: 12)
         .accessibilityIdentifier("layout-editor-inspector")
+    }
+
+    private func stickZoneInspector(_ id: String) -> some View {
+        let zone = session.editor.zone(of: id) ?? session.editor.frame(of: id)
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Touch area").font(.system(size: 14, weight: .semibold))
+            Text("Start anywhere in the shaded area. Buttons keep priority.")
+                .font(.system(size: 12)).foregroundStyle(PP.muted)
+            Text("Width: \(Int(zone?.width ?? 0)) pt").font(.system(size: 12))
+            HStack(spacing: 6) {
+                button("edit:zoneNarrower", "− Width") { session.resizeStickZone(horizontally: true, by: -1) }
+                button("edit:zoneWider", "+ Width") { session.resizeStickZone(horizontally: true, by: 1) }
+            }
+            Text("Height: \(Int(zone?.height ?? 0)) pt").font(.system(size: 12))
+            HStack(spacing: 6) {
+                button("edit:zoneShorter", "− Height") { session.resizeStickZone(horizontally: false, by: -1) }
+                button("edit:zoneTaller", "+ Height") { session.resizeStickZone(horizontally: false, by: 1) }
+            }
+            button("edit:zoneLowerLeft", "Lower-left area") { session.useLowerLeftStickZone() }
+        }
     }
 
     /// A row as the board's: light while the focus ring is on it.
@@ -709,6 +819,7 @@ private final class LayoutCanvasView: UIView, UIGestureRecognizerDelegate {
     init() {
         super.init(frame: .zero)
         backgroundColor = .clear
+        clipsToBounds = true
         isMultipleTouchEnabled = true
         grid.strokeColor = Self.edge.withAlphaComponent(0.05).cgColor
         grid.lineWidth = 1
@@ -748,10 +859,12 @@ private final class LayoutCanvasView: UIView, UIGestureRecognizerDelegate {
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(tapped(_:)))
         let drag = UIPanGestureRecognizer(target: self, action: #selector(panned(_:)))
-        drag.maximumNumberOfTouches = 2
+        drag.maximumNumberOfTouches = 1
         drag.delegate = self
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:)))
         pinch.delegate = self
+        tap.require(toFail: drag)
+        tap.require(toFail: pinch)
         [tap, drag, pinch].forEach(addGestureRecognizer)
         accessibilityIdentifier = "layout-editor-canvas"
     }
@@ -771,6 +884,9 @@ private final class LayoutCanvasView: UIView, UIGestureRecognizerDelegate {
     // MARK: drawing
 
     func show(_ e: LayoutEditor, opacity: Double) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
         editor = e
         controlsLayer.alpha = CGFloat(opacity)
         let area = e.insets.area(width: e.width, height: e.height)
@@ -835,10 +951,12 @@ private final class LayoutCanvasView: UIView, UIGestureRecognizerDelegate {
             var key = c
             key.anchor = .center; key.x = 0; key.y = 0; key.floatingZone = nil
             key.width = Double(f.width); key.height = Double(f.height)
-            if let old = views.removeValue(forKey: c.id), old.key == key {
+            let old = views.removeValue(forKey: c.id)
+            if let old, old.key == key {
                 old.view.frame = f
                 kept[c.id] = old
             } else {
+                old?.view.removeFromSuperview()
                 kept[c.id] = (key, Self.container(c, frame: f))
             }
             controlsLayer.addSubview(kept[c.id]!.view)   // to the front, in order
@@ -885,8 +1003,13 @@ private final class LayoutCanvasView: UIView, UIGestureRecognizerDelegate {
                 pan = .handle(id, centre: TouchPoint(x: Double(f.midX), y: Double(f.midY)),
                               from: TouchPoint(x: Double(start.x), y: Double(start.y)))
             } else if let id = e.control(atX: Double(start.x), y: Double(start.y)) {
-                session.select(id)
-                pan = .drag(id)
+                if session.multiSelect && !e.selectedIDs.contains(id) {
+                    // The first finger of a group pinch may land on the background surface.
+                    pan = nil
+                } else {
+                    session.select(id)
+                    pan = .drag(id)
+                }
             } else {
                 pan = nil
             }

@@ -189,6 +189,8 @@ final class InGameMenu: ObservableObject {
         case .mouseSensitivity:
             mine.mouseSensitivity = PointerSensitivity.step(mine.mouseSensitivity(over: ControlsStore.shared.defaults),
                                                             by: by, wrapping: wrapping)
+        case .pointerAcceleration:
+            mine.pointerAcceleration = wrapping ? !mine.pointerAcceleration(over: ControlsStore.shared.defaults) : by > 0
         case .gyro:
             mine.gyro = GyroRow.output.setting(GyroRow.output.step(ControlsStore.shared.gyro(id), by: by, wrapping: wrapping),
                                                in: mine.gyro)
@@ -653,6 +655,12 @@ private struct ControlsPanel: View {
         case .mouseSensitivity:
             row(.mouseSensitivity, subtitle: "Mouse and relative touch look") {
                 stepper(.mouseSensitivity, PointerSensitivity.label(pointerSensitivity(trackpad: false)))
+            }
+        case .pointerAcceleration:
+            row(.pointerAcceleration, subtitle: "Touch trackpad and touch look") {
+                let game = TitleLaunch.shared.titleID.map { store.game($0) }
+                let enabled = game?.pointerAcceleration(over: store.defaults) ?? store.defaults.pointerAcceleration
+                stepper(.pointerAcceleration, enabled ? "On" : "Off")
             }
         case .gyro: row(.gyro, subtitle: gyroSource) { choices(.gyro, GyroOutput.allCases, gyro.output, title: \.gyroTitle) }
         case .gyroSensitivity: row(.gyroSensitivity) { stepper(.gyroSensitivity, GyroText.sensitivity(gyro.sensitivity)) }

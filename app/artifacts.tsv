@@ -2385,8 +2385,8 @@ resource	Runtime/steamapi/x86_64-windows/steam_api64.dll	8353280	c3daff5a597cc18
 resource	Runtime/steamapi/i386-windows/steam_api.dll	8667648	e02446db0fc003f6947ea03025a9a522e2bd7ab5dc71ca9474f576c034aacc71	steamapi	i386-windows/steam_api.dll	P8-steamapi
 resource	Runtime/arm64ec-windows/playport-session.exe	45056	5809fa8883fe08dbde32bcaed5f9c0e00b1dab4afe6f0eadfcb79b75fb42116c	session	playport-session.exe	P9-session
 resource	Runtime/arm64ec-windows/playport-url-opener.exe	5120	a4a9e67cec4f8df8e902e2a0714dd7c4828a4d3e0cabb65ef2fb6e214f0a6e4d	session	playport-url-opener.exe	P9-url-opener
-resource	Runtime/steamclient/x86_64-windows/steamclient64.dll	640512	2c03bddee63871a4c7c878d03974281f9f1d70d7a5970880fa5c99539aad3d75	steamclient	steamclient64.dll	P9-steamclient
-resource	Runtime/steamclient/i386-windows/steamclient.dll	401920	62fc9860e317c9ce8374559cc249fc6a49c4f3996cfe3b850e69d07a23a207fc	steamclient	steamclient.dll	P9-steamclient
+resource	Runtime/steamclient/x86_64-windows/steamclient64.dll	641024	86d70db2b65be03c57b26fcf46fbbc94ce64c835fabf3b0060f10ac3aa935ab9	steamclient	steamclient64.dll	P9-steamclient
+resource	Runtime/steamclient/i386-windows/steamclient.dll	401920	a9bb90ccc1ffa2856baeb514820efbb67c84540a5233990f8c36e64297b489bd	steamclient	steamclient.dll	P9-steamclient
 resource	Runtime/nls/c_1252.nls	66082	e2634ee32da7977d762d2d45be2053309ee718572a7d8bb0034180dc1b0b6b76	unix	wine/nls/c_1252.nls	nls
 resource	Runtime/nls/c_20127.nls	66082	951a19ce0d3c785d12ea94cb28ce5c2c096d302e35b3fb3e8b35248a006435ba	unix	wine/nls/c_20127.nls	nls
 resource	Runtime/nls/c_28591.nls	66082	aa52cf173808f65b117f0d7af574c11dde85133cccde306ccc57b5de50961b5c	unix	wine/nls/c_28591.nls	nls

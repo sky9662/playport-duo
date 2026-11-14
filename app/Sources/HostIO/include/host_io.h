@@ -70,7 +70,9 @@ unsigned int playport_key_scan(unsigned int vk);
  * deactivated and its process (NULL, 0: none). Returns the index of saved if it
  * can still be activated (visible, enabled, not minimized, not a child, not
  * WS_EX_NOACTIVATE), else of the topmost such window of saved_pid's process,
- * else of the topmost such window, else -1. */
+ * else of saved when it is minimized but otherwise eligible and still belongs
+ * to saved_pid (Winios restores it before activation), else of the topmost
+ * activatable window, else -1. Other minimized windows are never restored. */
 typedef struct {
     const void *hwnd;
     unsigned int pid;

@@ -179,7 +179,9 @@ public struct LayoutEditor: Equatable, Sendable {
     public var canRedo: Bool { !redoStack.isEmpty }
 
     /// The layout is not the bare preset.
-    public var isEdited: Bool { layout != presetLayout(preset) }
+    public var isEdited: Bool { layout.controls != presetLayout(preset).controls }
+
+    public var canvasSize: ControlLayoutSize { ControlLayoutSize(width: area.width, height: area.height) }
 
     /// Another preset or layout than it opened on (a gesture going on not counted until it ends).
     public var changed: Bool { snapshot != opened }
@@ -364,6 +366,44 @@ public struct LayoutEditor: Equatable, Sendable {
         record(g.before)
     }
 
+    /// The movement stick's landing area, separate from its visible size.
+    /// An absent floating zone starts from the current glyph's rectangle.
+    public mutating func resizeStickZone(_ id: String, horizontally: Bool, by steps: Int) {
+        guard let c = layout.control(id), c.kind == .stick, steps != 0 else { return }
+        let a = area
+        guard a.width > 0, a.height > 0 else { return }
+        let glyph = c.frame(width: width, height: height, insets: insets)
+        let old = c.floatingZone?.frame(in: a) ?? glyph
+        let w = horizontally ? min(a.width, max(min(Self.minimumSide, a.width), old.width + Double(steps) * 16)) : old.width
+        let h = horizontally ? old.height : min(a.height, max(min(Self.minimumSide, a.height), old.height + Double(steps) * 16))
+        // Grow around the centre. At a safe-area edge, shift only as far as
+        // needed to keep both the landing area and its centred glyph visible.
+        let halfW = max(w, glyph.width) / 2, halfH = max(h, glyph.height) / 2
+        let cx = min(a.x + a.width - halfW, max(a.x + halfW, old.x + old.width / 2))
+        let cy = min(a.y + a.height - halfH, max(a.y + halfH, old.y + old.height / 2))
+        let zone = TouchRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h)
+        edit(id) { control in
+            control.floatingZone = ControlZone(anchor: .center, width: w, height: h)
+            control.placeZone(at: zone, in: a)
+            control.place(at: TouchRect(x: cx - glyph.width / 2, y: cy - glyph.height / 2,
+                                       width: glyph.width, height: glyph.height), in: a)
+        }
+    }
+
+    /// A broad lower-left landing area; explicit buttons still win hit testing.
+    public mutating func useLowerLeftStickZone(_ id: String) {
+        guard let c = layout.control(id), c.kind == .stick, area.width > 0, area.height > 0 else { return }
+        let zone = ControlZone(anchor: .bottomLeading, width: area.width / 2, height: area.height / 2)
+        let frame = zone.frame(in: area), glyph = c.frame(width: width, height: height, insets: insets)
+        let a = area
+        edit(id) { control in
+            control.floatingZone = zone
+            control.place(at: TouchRect(x: frame.x + (frame.width - glyph.width) / 2,
+                                       y: frame.y + (frame.height - glyph.height) / 2,
+                                       width: glyph.width, height: glyph.height).kept(in: a), in: a)
+        }
+    }
+
     /// The inspector's size: `steps` grid steps more (fewer) each way, about the centre.
     public mutating func resize(_ id: String, by steps: Int) {
         if selectedIDs.count > 1, selectedIDs.contains(id), let group = selectionFrame, group.width > 0 {
@@ -486,7 +526,7 @@ public struct LayoutEditor: Equatable, Sendable {
         let before = snapshot
         layout = presetLayout(preset)
         explicitCopy = false
-        record(before)
+        record(before, recordingSize: false)
         selection = nil
     }
 
@@ -497,7 +537,7 @@ public struct LayoutEditor: Equatable, Sendable {
         let before = snapshot
         preset = p
         layout = copies[p] ?? presetLayout(p)
-        record(before)
+        record(before, recordingSize: false)
         selection = nil
     }
 
@@ -511,7 +551,21 @@ public struct LayoutEditor: Equatable, Sendable {
         layout = variant.layout
         explicitCopy = true
         select(nil)
-        record(before)
+        record(before, recordingSize: false)
+    }
+
+    /// Replace only this display, with one undo step and an independent value.
+    /// A nil source size deliberately means an unscaled legacy copy.
+    public mutating func copyDisplayLayout(preset: OnScreenLayout, layout source: ControlLayout,
+                                          sourceSize: ControlLayoutSize? = nil) {
+        guard preset != .off, canvasSize.isValid else { return }
+        endGesture()
+        let before = snapshot
+        self.preset = preset
+        layout = source.copied(to: canvasSize, from: sourceSize)
+        explicitCopy = true
+        select(nil)
+        record(before, recordingSize: false)
     }
 
     public mutating func undo() {
@@ -577,8 +631,9 @@ public struct LayoutEditor: Equatable, Sendable {
     }
 
     /// One undo step back to `before`, when anything changed.
-    mutating func record(_ before: Snapshot) {
+    mutating func record(_ before: Snapshot, recordingSize: Bool = true) {
         guard before != snapshot else { return }
+        if recordingSize, canvasSize.isValid { layout.referenceSize = canvasSize }
         undoStack.append(before)
         if undoStack.count > Self.undoLimit { undoStack.removeFirst() }
         redoStack = []
@@ -614,8 +669,8 @@ public struct LayoutEditor: Equatable, Sendable {
             let transformed = TouchRect(x: cx + (f.x - cx) * scale + shiftX, y: cy + (f.y - cy) * scale + shiftY,
                                         width: f.width * scale, height: f.height * scale)
             if let z = c.floatingZone?.frame(in: a) {
-                let zone = TouchRect(x: cx + (z.x - cx) * scale + shiftX, y: cy + (z.y - cy) * scale + shiftY,
-                                     width: z.width * scale, height: z.height * scale)
+                let zone = TouchRect(x: z.x + shiftX, y: z.y + shiftY,
+                                     width: z.width, height: z.height)
                 c.placeZone(at: zone.kept(in: a), in: a)
             }
             c.place(at: transformed, in: a)

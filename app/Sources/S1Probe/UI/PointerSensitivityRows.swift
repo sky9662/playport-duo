@@ -9,6 +9,37 @@ struct PointerSensitivityRows: View {
     var body: some View {
         row(trackpad: true)
         row(trackpad: false)
+        accelerationRow
+    }
+
+    private var accelerationRow: some View {
+        let own = gameID.map { store.game($0) }?.pointerAcceleration
+        let value = own ?? store.defaults.pointerAcceleration
+        return PadRow(id: (gameID == nil ? "set:" : "opt:") + PointerSensitivity.accelerationKey,
+                      title: "Touch acceleration", subtitle: "Touch trackpad and touch look: slow is finer, fast travels farther",
+                      value: value ? "On" : "Off", accessory: .chevron,
+                      changed: gameID == nil ? !value : own != nil, hint: "Change",
+                      reset: { setAcceleration(nil) }) {
+            PadModal.shared.picker(title: "Touch acceleration", context: gameID == nil ? "Settings · Controls" : "Game · Controls",
+                note: "Applies on top of your sensitivity. Off restores constant speed. Does not change physical mouse, scrolling, controller or gyro input.",
+                options: [PadOption(id: "", label: "Default", detail: gameID == nil ? "On" : (store.defaults.pointerAcceleration ? "On" : "Off") + ", from Settings"),
+                          PadOption(id: "on", label: "On"), PadOption(id: "off", label: "Off")],
+                selected: (gameID == nil ? (value ? nil : false) : own).map { $0 ? "on" : "off" } ?? "") {
+                    setAcceleration($0.isEmpty ? nil : $0 == "on")
+                }
+        }
+    }
+
+    private func setAcceleration(_ value: Bool?) {
+        if let gameID {
+            var game = store.game(gameID)
+            game.pointerAcceleration = value
+            store.setGame(gameID, game)
+        } else if let value {
+            UserDefaults.standard.set(value, forKey: PointerSensitivity.accelerationKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: PointerSensitivity.accelerationKey)
+        }
     }
 
     private func row(trackpad: Bool) -> some View {

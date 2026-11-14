@@ -202,44 +202,90 @@ private struct GameDetailPage: View {
                 Color(hex: 0x05070A).opacity(0.72).ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture { _ = navigation.back() }
-                HStack(spacing: 0) {
-                    if panel == .gyro, let t {
-                        // Gyro aim's test area at the left, over the page's dimmed title (GyroAim.dc.html).
-                        GyroTestArea(target: .game(t.id))
-                            .frame(maxWidth: 330)
-                            .padding(.leading, 24).padding(.trailing, 20).padding(.top, 70)
-                            .padding(.bottom, AppShell.footerBottom + 36 + 12)
-                    } else {
-                        // The note sits low at the left, just above the footer the shell
-                        // draws there (36 pt), clear of the page's dimmed title and
-                        // subtitle (GameOptions.dc.html puts it under the title).
-                        VStack(alignment: .leading) {
-                            Spacer()
-                            if panel == .options {
-                                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                    Circle().fill(PP.accent).frame(width: 7, height: 7)
-                                    Text("Changed for this game. The rest follow Settings.")
-                                        .fixedSize(horizontal: false, vertical: true)
+                Group {
+                    if SceneDisplay.usesDuoLayout {
+                        GeometryReader { geo in
+                            HStack(spacing: 0) {
+                                if panel == .gyro, let t, geo.size.width > 454 {
+                                    // Gyro aim's test area at the left, over the page's dimmed title (GyroAim.dc.html).
+                                    GyroTestArea(target: .game(t.id))
+                                        .frame(maxWidth: max(0, min(330, geo.size.width - 454)))
+                                        .padding(.leading, 24).padding(.trailing, 20).padding(.top, 70)
+                                        .padding(.bottom, AppShell.footerBottom + 36 + 12)
+                                } else if geo.size.width >= 760 {
+                                    // The note sits low at the left, just above the footer the shell
+                                    // draws there (36 pt), clear of the page's dimmed title and
+                                    // subtitle (GameOptions.dc.html puts it under the title).
+                                    VStack(alignment: .leading) {
+                                        Spacer()
+                                        if panel == .options {
+                                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                                Circle().fill(PP.accent).frame(width: 7, height: 7)
+                                                Text("Changed for this game. The rest follow Settings.")
+                                                    .fixedSize(horizontal: false, vertical: true)
+                                            }
+                                            .font(.system(size: 13)).foregroundStyle(PP.soft)
+                                            .padding(.bottom, AppShell.footerBottom + 36 + 12)
+                                        }
+                                    }
+                                    .allowsHitTesting(false)
                                 }
-                                .font(.system(size: 13)).foregroundStyle(PP.soft)
-                                .padding(.bottom, AppShell.footerBottom + 36 + 12)
+                                Spacer(minLength: 0)
+                                Group {
+                                    switch panel {
+                                    case .options: if let t { optionsPanel(t, g) }
+                                    case .achievements: achievementsPanel
+                                    case .gyro: if let t { GyroAimPanel(titleID: t.id, context: name) }
+                                    case .controller: EmptyView()
+                                    }
+                                }
+                                .frame(width: min(410, geo.size.width))
+                                .frame(maxHeight: .infinity, alignment: .top)
+                                .background(PP.surface.ignoresSafeArea(edges: [.top, .trailing, .bottom]))
+                                .overlay(alignment: .leading) { Rectangle().fill(PP.line).frame(width: 1).ignoresSafeArea(edges: [.top, .bottom]) }
                             }
                         }
-                        .allowsHitTesting(false)
-                    }
-                    Spacer(minLength: 0)
-                    Group {
-                        switch panel {
-                        case .options: if let t { optionsPanel(t, g) }
-                        case .achievements: achievementsPanel
-                        case .gyro: if let t { GyroAimPanel(titleID: t.id, context: name) }
-                        case .controller: EmptyView()
+                    } else {
+                        HStack(spacing: 0) {
+                            if panel == .gyro, let t {
+                                // Gyro aim's test area at the left, over the page's dimmed title (GyroAim.dc.html).
+                                GyroTestArea(target: .game(t.id))
+                                    .frame(maxWidth: 330)
+                                    .padding(.leading, 24).padding(.trailing, 20).padding(.top, 70)
+                                    .padding(.bottom, AppShell.footerBottom + 36 + 12)
+                            } else {
+                                // The note sits low at the left, just above the footer the shell
+                                // draws there (36 pt), clear of the page's dimmed title and
+                                // subtitle (GameOptions.dc.html puts it under the title).
+                                VStack(alignment: .leading) {
+                                    Spacer()
+                                    if panel == .options {
+                                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                            Circle().fill(PP.accent).frame(width: 7, height: 7)
+                                            Text("Changed for this game. The rest follow Settings.")
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        }
+                                        .font(.system(size: 13)).foregroundStyle(PP.soft)
+                                        .padding(.bottom, AppShell.footerBottom + 36 + 12)
+                                    }
+                                }
+                                .allowsHitTesting(false)
+                            }
+                            Spacer(minLength: 0)
+                            Group {
+                                switch panel {
+                                case .options: if let t { optionsPanel(t, g) }
+                                case .achievements: achievementsPanel
+                                case .gyro: if let t { GyroAimPanel(titleID: t.id, context: name) }
+                                case .controller: EmptyView()
+                                }
+                            }
+                            .frame(width: 410)
+                            .frame(maxHeight: .infinity, alignment: .top)
+                            .background(PP.surface.ignoresSafeArea(edges: [.top, .trailing, .bottom]))
+                            .overlay(alignment: .leading) { Rectangle().fill(PP.line).frame(width: 1).ignoresSafeArea(edges: [.top, .bottom]) }
                         }
                     }
-                    .frame(width: 410)
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .background(PP.surface.ignoresSafeArea(edges: [.top, .trailing, .bottom]))
-                    .overlay(alignment: .leading) { Rectangle().fill(PP.line).frame(width: 1).ignoresSafeArea(edges: [.top, .bottom]) }
                 }
                 .transition(.move(edge: .trailing))
             }
@@ -324,34 +370,77 @@ private struct GameDetailPage: View {
                                 ?? epicGame.map { PageArt(appID: nil, name: $0.title, info: nil, storeKey: StoreGameKey(store: .epic, id: $0.id)) }
                                 ?? bnetProduct.map { PageArt(appID: nil, name: $0.name, info: nil, storeKey: BattleNet.key($0)) })
 
-            HStack(alignment: .top, spacing: 24) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(name).font(PP.display(48)).foregroundStyle(PP.text)
-                        .lineLimit(1).minimumScaleFactor(0.5)
-                    Group {
-                        if let line = subtitle(t, g) {
-                            Text(line).font(.system(size: 13)).foregroundStyle(PP.soft)
+            Group {
+                if SceneDisplay.usesDuoLayout {
+                    GeometryReader { geo in
+                        let columns = geo.size.width - 64 >= 760
+                        let arrangement = columns
+                            ? AnyLayout(HStackLayout(alignment: .top, spacing: 24))
+                            : AnyLayout(VStackLayout(alignment: .leading, spacing: 24))
+                        ScrollView(.vertical, showsIndicators: true) {
+                            arrangement {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(name).font(PP.display(48)).foregroundStyle(PP.text)
+                                        .lineLimit(1).minimumScaleFactor(0.5)
+                                    Group {
+                                        if let line = subtitle(t, g) {
+                                            Text(line).font(.system(size: 13)).foregroundStyle(PP.soft)
+                                        }
+                                        // One row of buttons that wraps rather than squeezing a label to a letter.
+                                        PageButtonRows {
+                                            if let t { installedButtons(t, g) } else if let g { installButtons(g) } else if let gg = gogGame { gogInstallButtons(gg) } else if let eg = epicGame { epicInstallButtons(eg) } else if let p = bnetProduct { bnetInstallButtons(p) }
+                                        }
+                                        .padding(.top, 14)
+                                        notes(t, g)
+                                            .font(.system(size: 13)).foregroundStyle(PP.muted)
+                                            .lineSpacing(2)
+                                            .padding(.top, 12)
+                                    }
+                                    .opacity(under ? 0 : 1)
+                                }
+                                .frame(maxWidth: 500, alignment: .leading)
+                                facts(t, g)
+                                    .frame(maxWidth: columns ? 270 : .infinity, alignment: .leading)
+                                    .padding(.top, columns ? 94 : 0)
+                                    .opacity(under ? 0 : 1)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 32)
+                            .padding(.top, 76)
+                            .padding(.bottom, 24)
                         }
-                        // One row of buttons that wraps rather than squeezing a label to a letter.
-                        PageButtonRows {
-                            if let t { installedButtons(t, g) } else if let g { installButtons(g) } else if let gg = gogGame { gogInstallButtons(gg) } else if let eg = epicGame { epicInstallButtons(eg) } else if let p = bnetProduct { bnetInstallButtons(p) }
-                        }
-                        .padding(.top, 14)
-                        notes(t, g)
-                            .font(.system(size: 13)).foregroundStyle(PP.muted)
-                            .lineSpacing(2)
-                            .padding(.top, 12)
                     }
-                    .opacity(under ? 0 : 1)
+                } else {
+                    HStack(alignment: .top, spacing: 24) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(name).font(PP.display(48)).foregroundStyle(PP.text)
+                                .lineLimit(1).minimumScaleFactor(0.5)
+                            Group {
+                                if let line = subtitle(t, g) {
+                                    Text(line).font(.system(size: 13)).foregroundStyle(PP.soft)
+                                }
+                                // One row of buttons that wraps rather than squeezing a label to a letter.
+                                PageButtonRows {
+                                    if let t { installedButtons(t, g) } else if let g { installButtons(g) } else if let gg = gogGame { gogInstallButtons(gg) } else if let eg = epicGame { epicInstallButtons(eg) } else if let p = bnetProduct { bnetInstallButtons(p) }
+                                }
+                                .padding(.top, 14)
+                                notes(t, g)
+                                    .font(.system(size: 13)).foregroundStyle(PP.muted)
+                                    .lineSpacing(2)
+                                    .padding(.top, 12)
+                            }
+                            .opacity(under ? 0 : 1)
+                        }
+                        .frame(maxWidth: 500, alignment: .leading)
+                        Spacer(minLength: 0)
+                        facts(t, g)
+                            .frame(width: 270)
+                            .padding(.top, 94)
+                            .opacity(under ? 0 : 1)
+                    }
+                    .padding(.top, 76)
                 }
-                .frame(maxWidth: 500, alignment: .leading)
-                Spacer(minLength: 0)
-                facts(t, g)
-                    .frame(width: 270)
-                    .padding(.top, 94)
-                    .opacity(under ? 0 : 1)
             }
-            .padding(.top, 76)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }

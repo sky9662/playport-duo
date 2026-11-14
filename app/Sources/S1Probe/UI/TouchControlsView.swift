@@ -215,6 +215,7 @@ final class OnScreenControls: ObservableObject {
         let defaults = ControlsStore.shared.defaults
         controls.trackpadScale = 2 * (game?.trackpadSensitivity(over: defaults) ?? defaults.trackpadSensitivity)
         controls.lookScale = 3 * (game?.mouseSensitivity(over: defaults) ?? defaults.mouseSensitivity)
+        controls.pointerAcceleration = game?.pointerAcceleration(over: defaults) ?? defaults.pointerAcceleration
         let compat = launch.titleID.flatMap { LaunchSettingsStore.compat.entry(for: $0)?.controls }
         let s = ControlsState.resolve(game: game, defaults: defaults, controllerConnected: controllers > 0, compat: compat,
                                       expanded: SceneDisplay.usesSideControls)
@@ -713,7 +714,7 @@ extension UIView {
         let own = safeAreaInsets, w = window?.safeAreaInsets ?? .zero
         var result = UIEdgeInsets(top: max(own.top, w.top), left: max(own.left, w.left),
                                   bottom: max(own.bottom, w.bottom), right: max(own.right, w.right))
-        if #available(iOS 27.1, *) {
+        if #available(iOS 27.1, *), SceneDisplay.usesDuoLayout {
             let regions = reservedRegions(kind: .occlusion).map {
                 TouchRect(cg: $0.frame.intersection(bounds).offsetBy(dx: -bounds.minX, dy: -bounds.minY))
             }

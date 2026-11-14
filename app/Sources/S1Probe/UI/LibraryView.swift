@@ -190,7 +190,7 @@ private struct LibraryGridView: View {
     @State private var position = ScrollPosition(edge: .top)
 
     private static func columns(for width: CGFloat) -> Int {
-        max(1, min(6, Int((max(0, width) + spacing.width) / (128 + spacing.width))))
+        SceneDisplay.uiProfile.libraryColumns(width: Double(width), spacing: Double(spacing.width))
     }
     private static let spacing = CGSize(width: 14, height: 16)
     private static let artHeight: CGFloat = 78
@@ -219,6 +219,7 @@ private struct LibraryGridView: View {
             }
         }
         // The ring starts on the first tile, on arrival and after the store, sort or search changes.
+        .padding(.horizontal, SceneDisplay.usesDuoLayout ? 24 : 0)
         // Back from a game page the ring is still on its tile, and stays there; on arrival the page
         // switch has put it top left, which is the column's All, so that does not count.
         .onAppear {

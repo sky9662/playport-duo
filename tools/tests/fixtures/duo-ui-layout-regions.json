@@ -1,0 +1,26 @@
+{
+  "detail-panel": {
+    "path": "app/Sources/S1Probe/UI/GameDetailView.swift",
+    "after": "private func content(",
+    "standard_sha256": "a048020188c60389c7e5952c89ce5ef2fd71a18e079aa3017c0d7ce43ed4132f",
+    "duo_sha256": "2062ab49c4a0256da54d0d05a73e0dce5a0e6d6fce494ae734c0ddcebcb40b38"
+  },
+  "detail-page": {
+    "path": "app/Sources/S1Probe/UI/GameDetailView.swift",
+    "after": "private func page(",
+    "standard_sha256": "1dfd5113917b15355471054dee15aa83bac294593f127ae74b34e47ef6d3f0b7",
+    "duo_sha256": "65984ba3ced9c9e4e38911ffc7ee101eb97c4e817dc4c2abe7e47bb1e9cc3d6a"
+  },
+  "picker": {
+    "path": "app/Sources/S1Probe/UI/Pad/PadPicker.swift",
+    "after": "struct PadPickerPanel: View",
+    "standard_sha256": "40829325daa0e9dad878e0613ea9be1641d0e13dfdcc665167cb972cc82455dc",
+    "duo_sha256": "97f6fe2f746d5cfe838b0423f2dccb8e26b6c65ac7f45ef188b26f41350d937a"
+  },
+  "editor-panel": {
+    "path": "app/Sources/S1Probe/UI/LayoutEditorView.swift",
+    "after": "struct LayoutEditorView: View",
+    "standard_sha256": "ecc7fb44a10ead5919b5939e37b249492d44a881a2213e9b042a3d2a5bbce697",
+    "duo_sha256": "117f74b89918985a5d27e60151acf738602d82d10bba716e2921f866dee09e1a"
+  }
+}

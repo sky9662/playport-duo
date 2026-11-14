@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import Foundation
 
-/// Three shared layout templates. Applying one copies it into the game's
+/// Five shared layout templates. Applying one copies it into the game's
 /// editor; later game edits never mutate the shared template.
 public struct ControlLayoutProfiles: Codable, Equatable, Sendable {
     public struct Variant: Codable, Equatable, Sendable {
@@ -31,9 +31,27 @@ public struct ControlLayoutProfiles: Codable, Equatable, Sendable {
         }
     }
     public static let storageKey = "controls.layoutProfiles"
-    public static let count = 3
+    public static let count = 5
     private var slots: [String: Profile] = [:]
     public init() {}
+    /// Preserve fields from newer versions when updating a known template.
+    /// Controls match by stable ID so removing one does not resurrect it.
+    public func json(preserving original: Data?) throws -> Data {
+        let current = try JSONSerialization.jsonObject(with: JSONEncoder().encode(self))
+        func merge(_ old: Any?, _ new: Any) -> Any {
+            if let previous = old as? [[String: Any]], let updates = new as? [[String: Any]],
+               updates.allSatisfy({ $0["id"] is String }) {
+                return updates.map { value in
+                    merge(previous.first { ($0["id"] as? String) == (value["id"] as? String) }, value)
+                }
+            }
+            guard var fields = old as? [String: Any], let updates = new as? [String: Any] else { return new }
+            for (key, value) in updates { fields[key] = merge(fields[key], value) }
+            return fields
+        }
+        let old = try original.map { try JSONSerialization.jsonObject(with: $0) }
+        return try JSONSerialization.data(withJSONObject: merge(old, current), options: [.sortedKeys])
+    }
     public subscript(_ slot: Int) -> Profile? { slots[String(slot)] }
     public func name(_ slot: Int) -> String { self[slot]?.name ?? "Profile \(slot + 1)" }
     public mutating func save(_ slot: Int, preset: OnScreenLayout, layout: ControlLayout) {

@@ -2167,6 +2167,8 @@ final class QuickMenuTests: XCTestCase {
         m.move(down: true, rows: noPad)
         XCTAssertEqual(m.panel, .mouseSensitivity)
         m.move(down: true, rows: noPad)
+        XCTAssertEqual(m.panel, .pointerAcceleration)
+        m.move(down: true, rows: noPad)
         XCTAssertEqual(m.panel, .gyro)
         m.move(down: true, rows: noPad)
         XCTAssertEqual(m.panel, .gyroSensitivity)
@@ -2206,7 +2208,7 @@ final class QuickMenuTests: XCTestCase {
     func testTheDpadAndRightStickRowsShowOnlyForThePlainGamepadLayout() {
         XCTAssertTrue(Self.gamepad.hasGamepadOptions)
         XCTAssertEqual(QuickMenuControlsRow.shown(controller: false, state: Self.gamepad),
-                       [.layout, .dpad, .rightStick, .opacity, .trackpadSensitivity, .mouseSensitivity, .gyro, .gyroSensitivity])
+                       [.layout, .dpad, .rightStick, .opacity, .trackpadSensitivity, .mouseSensitivity, .pointerAcceleration, .gyro, .gyroSensitivity])
         let hidden = ControlsState(layout: .gamepad, visible: false, opacity: 0.6, padConnected: false)
         XCTAssertTrue(QuickMenuControlsRow.shown(controller: true, state: hidden).contains(.dpad))
         for state in [ControlsState(layout: .keyboardMouse, visible: true, opacity: 0.6),
@@ -2215,7 +2217,7 @@ final class QuickMenuTests: XCTestCase {
                       ControlsState(layout: .gamepad, visible: true, opacity: 0.6, edited: .gamepad(dpad: .on))] {
             XCTAssertFalse(state.hasGamepadOptions, "\(state.layout)")
             XCTAssertEqual(QuickMenuControlsRow.shown(controller: true, state: state),
-                           [.layout, .opacity, .trackpadSensitivity, .mouseSensitivity, .gyro, .gyroSensitivity, .controllerMap], "\(state.layout)")
+                           [.layout, .opacity, .trackpadSensitivity, .mouseSensitivity, .pointerAcceleration, .gyro, .gyroSensitivity, .controllerMap], "\(state.layout)")
         }
     }
 }

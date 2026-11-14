@@ -71,26 +71,67 @@ struct PadPickerPanel: View {
     @ObservedObject var session: PadPickerSession
 
     var body: some View {
-        ZStack {
-            // The design's scrim; a tap on it goes back.
-            Color(hex: 0x05070A).opacity(0.72).ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture { session.press(.b) }
-            HStack(spacing: 0) {
-                VStack {
-                    Spacer()
-                    HStack(spacing: 18) {
-                        PadModalHint(button: .a, label: "Choose") { session.press(.a) }
-                        PadModalHint(button: .b, label: "Back") { session.press(.b) }
-                        Spacer(minLength: 0)
+        Group {
+            if SceneDisplay.usesDuoLayout {
+                GeometryReader { geo in
+                    let wide = geo.size.width >= 660
+                    ZStack {
+                        // The design's scrim; a tap on it goes back.
+                        Color(hex: 0x05070A).opacity(0.72).ignoresSafeArea()
+                            .contentShape(Rectangle())
+                            .onTapGesture { session.press(.b) }
+                        HStack(spacing: 0) {
+                            if wide {
+                                VStack {
+                                    Spacer()
+                                    HStack(spacing: 18) {
+                                        PadModalHint(button: .a, label: "Choose") { session.press(.a) }
+                                        PadModalHint(button: .b, label: "Back") { session.press(.b) }
+                                        Spacer(minLength: 0)
+                                    }
+                                    .padding(.leading, 36)
+                                    .frame(height: 36)
+                                }
+                            } else { Spacer(minLength: 0) }
+                            panel
+                                .safeAreaInset(edge: .bottom) {
+                                    if !wide {
+                                        HStack(spacing: 18) {
+                                            PadModalHint(button: .a, label: "Choose") { session.press(.a) }
+                                            PadModalHint(button: .b, label: "Back") { session.press(.b) }
+                                            Spacer(minLength: 0)
+                                        }
+                                        .padding(14).background(PP.surface)
+                                    }
+                                }
+                                .frame(width: min(410, geo.size.width))
+                        }
                     }
-                    .padding(.leading, 36)
-                    .frame(height: 36)
                 }
-                panel.frame(width: 410)
+                .accessibilityIdentifier("pad-picker")
+            } else {
+                ZStack {
+                    // The design's scrim; a tap on it goes back.
+                    Color(hex: 0x05070A).opacity(0.72).ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture { session.press(.b) }
+                    HStack(spacing: 0) {
+                        VStack {
+                            Spacer()
+                            HStack(spacing: 18) {
+                                PadModalHint(button: .a, label: "Choose") { session.press(.a) }
+                                PadModalHint(button: .b, label: "Back") { session.press(.b) }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.leading, 36)
+                            .frame(height: 36)
+                        }
+                        panel.frame(width: 410)
+                    }
+                }
+                .accessibilityIdentifier("pad-picker")
             }
         }
-        .accessibilityIdentifier("pad-picker")
     }
 
     private var panel: some View {

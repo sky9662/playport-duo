@@ -48,6 +48,9 @@ extension ControlLayout {
     /// opt out at the caller, so folding never rewrites the user's placement.
     public func sideReachLayout() -> ControlLayout {
         var result = self
+        // An inherited inner layout is displayed on a different canvas; its
+        // outer layout's reference dimensions cannot describe that canvas.
+        result.referenceSize = nil
         for anchor in [ControlAnchor.topLeading, .topTrailing] {
             let indices = controls.indices.filter { controls[$0].anchor == anchor && !controls[$0].isSurface }
             guard !indices.isEmpty else { continue }
@@ -282,12 +285,22 @@ public struct Control: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
+/// Safe-area dimensions where a layout was edited. Used only for an explicit
+/// cross-display copy; ordinary folding and rendering never rescale controls.
+public struct ControlLayoutSize: Codable, Equatable, Sendable {
+    public var width: Double, height: Double
+    public init(width: Double, height: Double) { self.width = width; self.height = height }
+    public var isValid: Bool { width.isFinite && height.isFinite && width > 0 && height > 0 }
+}
+
 public struct ControlLayout: Codable, Equatable, Sendable {
     /// The layout format this build writes and reads.
     public static let currentVersion = 3
 
     public var version: Int
     public var controls: [Control]
+    public var referenceSize: ControlLayoutSize?
+    enum CodingKeys: String, CodingKey { case version, controls, referenceSize }
 
     public init(controls: [Control]) {
         version = Self.currentVersion
@@ -307,7 +320,18 @@ public struct ControlLayout: Codable, Equatable, Sendable {
                                                    debugDescription: "layout version \(version); this build reads \(Self.currentVersion)")
         }
         controls = try c.decode([Control].self, forKey: .controls)
+        referenceSize = try c.decodeIfPresent(ControlLayoutSize.self, forKey: .referenceSize)
+        if referenceSize?.isValid == false { referenceSize = nil }
         if let p = problem { throw DecodingError.dataCorruptedError(forKey: .controls, in: c, debugDescription: p) }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(version, forKey: .version)
+        try c.encode(controls, forKey: .controls)
+        // Explicit null clears old size metadata when the profile store merges
+        // known layouts with fields preserved from a newer app version.
+        try c.encode(referenceSize, forKey: .referenceSize)
     }
 
     /// Why the layout cannot be used: a control's problem, or two controls with one id.
@@ -319,6 +343,26 @@ public struct ControlLayout: Codable, Equatable, Sendable {
     }
 
     public func control(_ id: String) -> Control? { controls.first { $0.id == id } }
+
+    /// One uniform scale for sizes, anchor offsets and floating zones. Surfaces
+    /// still fill the target safe area. Anchor groups keep their edge alignment.
+    public func copied(to size: ControlLayoutSize, from fallback: ControlLayoutSize? = nil) -> ControlLayout {
+        guard size.isValid else { return self }
+        var result = self
+        let source = referenceSize ?? fallback
+        let scale = source.flatMap { $0.isValid ? min(size.width / $0.width, size.height / $0.height) : nil } ?? 1
+        for i in result.controls.indices where !result.controls[i].isSurface {
+            result.controls[i].x *= scale; result.controls[i].y *= scale
+            result.controls[i].width *= scale; result.controls[i].height *= scale
+            if var zone = result.controls[i].floatingZone {
+                zone.x *= scale; zone.y *= scale
+                zone.width *= scale; zone.height *= scale
+                result.controls[i].floatingZone = zone
+            }
+        }
+        result.referenceSize = size
+        return result
+    }
 
     /// What TouchControls hit-tests in a view of width × height with these
     /// safe-area insets, in the layout's order.

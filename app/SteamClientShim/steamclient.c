@@ -845,8 +845,24 @@ static const char *friends_GetFriendPersonaName(iface *self, uint64_t steam_id)
     return snapshot.armed && steam_id == snapshot.steam_id ? snapshot.persona : "";
 }
 
+/* ISteamController's no-argument lifecycle is independent of device discovery:
+ * Init succeeds even with no Steam Controller. Native XInput devices are not
+ * Steam Controller handles. Keep enumeration empty until this shim has a real
+ * Steam Controller provider; do not advertise a controller it cannot read. */
+static uint8_t controller_Init(iface *self) { (void)self; return 1; }
+static uint8_t controller_Shutdown(iface *self) { (void)self; return 1; }
+static int32_t controller_GetConnectedControllers(iface *self, uint64_t *handles)
+{
+    (void)self; (void)handles;
+    return 0;
+}
+
 /* What a method name answers with, in any version that has it. */
 static const struct { const char *family, *method; void *fn; } served[] = {
+    { "ISteamController", "Init", (void *)controller_Init },
+    { "ISteamController", "Shutdown", (void *)controller_Shutdown },
+    { "ISteamController", "RunFrame", (void *)client_quiet },
+    { "ISteamController", "GetConnectedControllers", (void *)controller_GetConnectedControllers },
     { "ISteamClient", "CreateSteamPipe", (void *)client_CreateSteamPipe },
     { "ISteamClient", "BReleaseSteamPipe", (void *)client_BReleaseSteamPipe },
     { "ISteamClient", "ConnectToGlobalUser", (void *)client_ConnectToGlobalUser },
@@ -955,6 +971,9 @@ static void fill(iface *o)
             if (of_family(o->name, served[k].family) && same(m, served[k].method)) fn = served[k].fn;
         /* InitiateGameConnection's (blob, cap, CSteamID, ip, port, secure) is 7 words; 004–009's differ. */
         if (fn == (void *)user_InitiateGameConnection && o->words[i] != 7) fn = NULL;
+        /* Controller001/003 take a configuration-path argument to Init. They
+         * are not the later no-argument contract, and stay unsupported here. */
+        if (fn == (void *)controller_Init && o->words[i] != 0) fn = NULL;
         o->targets[i] = fn;
         o->kinds[i] = fn ? pp_tr_kind_of(m) : 0;
 #ifdef __i386__
